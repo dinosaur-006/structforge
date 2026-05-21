@@ -1,0 +1,17 @@
+export const copy = {
+  appName: 'StructForge',
+  navAnalyze: '\u6837\u4f8b\u5206\u6790\u53f0',
+  navProjects: '\u9879\u76ee\u5217\u8868',
+  projectsTitle: '\u6211\u7684\u9879\u76ee',
+  newProject: '\u65b0\u5efa\u9879\u76ee',
+  analyzeTitle: '\u6837\u4f8b\u5206\u6790\u53f0',
+  analyzeSubtitle: '\u4e0a\u4f20\u6837\u4f8b\u89c6\u9891\uff0cAI \u5c06\u81ea\u52a8\u62c6\u89e3\u5176\u7ed3\u6784\u57fa\u56e0',
+  exportJson: '\u5bfc\u51fa JSON',
+  nextStep: '\u4e0b\u4e00\u6b65',
+  migrateTitle: '\u7ed3\u6784\u8fc1\u79fb\u53f0',
+  resultTitle: '\u7ed3\u679c\u5c55\u793a\u53f0',
+  previewResult: '\u9884\u89c8\u7ed3\u679c',
+  generateVideo: '\u751f\u6210\u89c6\u9891',
+  exportVideo: '\u5bfc\u51fa\u89c6\u9891',
+  exportReport: '\u5bfc\u51fa\u62a5\u544a',
+};
