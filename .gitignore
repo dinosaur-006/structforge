@@ -26,16 +26,22 @@ npm-debug.log*
 
 # Python
 __pycache__/
+.pytest_cache/
+.tmp/
 *.py[cod]
 *.egg-info/
 .venv/
 venv/
 
 # Upload and output directories
+data/*.db
 data/uploads/*
 data/outputs/*
 !data/uploads/.gitkeep
 !data/outputs/.gitkeep
+
+# Local verification artifacts
+ai-services/test_video.mp4
 
 # Test coverage
 coverage/
