@@ -4,8 +4,9 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
-from sqlalchemy import Column, Integer, MetaData, String, Table, Text, create_engine, select
+from sqlalchemy import Column, Integer, MetaData, String, Table, Text, create_engine, select, text
 from sqlalchemy.engine import Engine
 
 from models.schemas import JobStatus, VideoStructure
@@ -35,8 +36,12 @@ projects = Table(
     metadata,
     Column("id", String, primary_key=True),
     Column("name", String, nullable=False),
+    Column("description", Text, nullable=False, default=""),
     Column("status", String, nullable=False),
     Column("analysis_result_json", Text, nullable=True),
+    Column("current_structure", Text, nullable=True),
+    Column("undo_stack", Text, nullable=True),
+    Column("redo_stack", Text, nullable=True),
     Column("created_at", String, nullable=False),
     Column("updated_at", String, nullable=False),
 )
@@ -50,6 +55,30 @@ def _status_value(status: JobStatus | str) -> str:
     return status.value if isinstance(status, JobStatus) else status
 
 
+_UNSET = object()
+
+
+def _dump_structure(structure: VideoStructure | dict[str, Any] | None) -> str | None:
+    if structure is None:
+        return None
+    payload = VideoStructure.model_validate(structure).model_dump(mode="json", by_alias=True)
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _dump_stack(stack: list[VideoStructure | dict[str, Any]] | None) -> str:
+    payload = [
+        VideoStructure.model_validate(item).model_dump(mode="json", by_alias=True)
+        for item in (stack or [])
+    ]
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _load_json(value: str | None, fallback: Any) -> Any:
+    if not value:
+        return fallback
+    return json.loads(value)
+
+
 class SQLiteRepository:
     def __init__(self, db_path: str | Path) -> None:
         self.db_path = Path(db_path)
@@ -58,6 +87,24 @@ class SQLiteRepository:
 
     def initialize(self) -> None:
         metadata.create_all(self.engine)
+        self._migrate_projects_table()
+
+    def _migrate_projects_table(self) -> None:
+        required_columns = {
+            "description": "TEXT NOT NULL DEFAULT ''",
+            "current_structure": "TEXT",
+            "undo_stack": "TEXT",
+            "redo_stack": "TEXT",
+        }
+        with self.engine.begin() as connection:
+            existing_columns = {
+                row[1] for row in connection.execute(text("PRAGMA table_info(projects)"))
+            }
+            for column_name, column_definition in required_columns.items():
+                if column_name not in existing_columns:
+                    connection.execute(
+                        text(f"ALTER TABLE projects ADD COLUMN {column_name} {column_definition}")
+                    )
 
     def create_job(self, job_id: str, source_path: str, project_id: str | None = None) -> None:
         now = _utc_now()
@@ -96,9 +143,9 @@ class SQLiteRepository:
             values["stage"] = stage
         if result is not None:
             if isinstance(result, VideoStructure):
-                result_payload = result.model_dump(mode="json")
+                result_payload = result.model_dump(mode="json", by_alias=True)
             else:
-                result_payload = VideoStructure.model_validate(result).model_dump(mode="json")
+                result_payload = VideoStructure.model_validate(result).model_dump(mode="json", by_alias=True)
             values["result_json"] = json.dumps(result_payload, ensure_ascii=False)
         if error is not None:
             values["error"] = error
@@ -121,8 +168,11 @@ class SQLiteRepository:
         if job and job.get("project_id"):
             self.upsert_project(
                 project_id=job["project_id"],
-                status="completed",
+                status="editing",
                 analysis_result=structure,
+                current_structure=structure,
+                undo_stack=[],
+                redo_stack=[],
             )
 
     def fail_job(self, job_id: str, error: str, stage: str = "Analysis failed") -> None:
@@ -143,14 +193,20 @@ class SQLiteRepository:
         self,
         project_id: str,
         name: str | None = None,
+        description: str | None = None,
         status: str = "analyzing",
         analysis_result: VideoStructure | dict[str, Any] | None = None,
+        current_structure: VideoStructure | dict[str, Any] | None | object = _UNSET,
+        undo_stack: list[VideoStructure | dict[str, Any]] | None | object = _UNSET,
+        redo_stack: list[VideoStructure | dict[str, Any]] | None | object = _UNSET,
     ) -> None:
         now = _utc_now()
-        result_json = None
-        if analysis_result is not None:
-            structure = VideoStructure.model_validate(analysis_result)
-            result_json = json.dumps(structure.model_dump(mode="json"), ensure_ascii=False)
+        result_json = _dump_structure(analysis_result) if analysis_result is not None else None
+        current_json = (
+            _dump_structure(current_structure) if current_structure is not _UNSET else _UNSET
+        )
+        undo_json = _dump_stack(undo_stack) if undo_stack is not _UNSET else _UNSET
+        redo_json = _dump_stack(redo_stack) if redo_stack is not _UNSET else _UNSET
 
         with self.engine.begin() as connection:
             existing = connection.execute(
@@ -160,30 +216,141 @@ class SQLiteRepository:
                 values: dict[str, Any] = {"status": status, "updated_at": now}
                 if name is not None:
                     values["name"] = name
+                if description is not None:
+                    values["description"] = description
                 if result_json is not None:
                     values["analysis_result_json"] = result_json
+                if current_json is not _UNSET:
+                    values["current_structure"] = current_json
+                if undo_json is not _UNSET:
+                    values["undo_stack"] = undo_json
+                if redo_json is not _UNSET:
+                    values["redo_stack"] = redo_json
                 connection.execute(projects.update().where(projects.c.id == project_id).values(**values))
             else:
                 connection.execute(
                     projects.insert().values(
                         id=project_id,
                         name=name or project_id,
+                        description=description or "",
                         status=status,
                         analysis_result_json=result_json,
+                        current_structure=None if current_json is _UNSET else current_json,
+                        undo_stack="[]" if undo_json is _UNSET else undo_json,
+                        redo_stack="[]" if redo_json is _UNSET else redo_json,
                         created_at=now,
                         updated_at=now,
                     )
                 )
+
+    def create_project(self, name: str, description: str = "") -> dict[str, Any]:
+        project_id = str(uuid4())
+        now = _utc_now()
+        with self.engine.begin() as connection:
+            connection.execute(
+                projects.insert().values(
+                    id=project_id,
+                    name=name,
+                    description=description,
+                    status="draft",
+                    analysis_result_json=None,
+                    current_structure=None,
+                    undo_stack="[]",
+                    redo_stack="[]",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        project = self.get_project(project_id)
+        if project is None:
+            raise RuntimeError("Failed to create project")
+        return project
+
+    def list_projects(self) -> list[dict[str, Any]]:
+        with self.engine.begin() as connection:
+            rows = connection.execute(select(projects).order_by(projects.c.updated_at.desc())).all()
+        return [self._project_row_to_dict(row._mapping) for row in rows]
+
+    def update_project(
+        self,
+        project_id: str,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> dict[str, Any] | None:
+        values: dict[str, Any] = {"updated_at": _utc_now()}
+        if name is not None:
+            values["name"] = name
+        if description is not None:
+            values["description"] = description
+        with self.engine.begin() as connection:
+            result = connection.execute(
+                projects.update().where(projects.c.id == project_id).values(**values)
+            )
+        if result.rowcount == 0:
+            return None
+        return self.get_project(project_id)
+
+    def delete_project(self, project_id: str) -> bool:
+        with self.engine.begin() as connection:
+            result = connection.execute(projects.delete().where(projects.c.id == project_id))
+        return result.rowcount > 0
+
+    def save_project_structure_state(
+        self,
+        project_id: str,
+        *,
+        current_structure: VideoStructure | dict[str, Any],
+        undo_stack: list[VideoStructure | dict[str, Any]],
+        redo_stack: list[VideoStructure | dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        with self.engine.begin() as connection:
+            result = connection.execute(
+                projects.update()
+                .where(projects.c.id == project_id)
+                .values(
+                    current_structure=_dump_structure(current_structure),
+                    undo_stack=_dump_stack(undo_stack),
+                    redo_stack=_dump_stack(redo_stack),
+                    updated_at=_utc_now(),
+                )
+            )
+        if result.rowcount == 0:
+            return None
+        return self.get_project(project_id)
+
+    def clear_project_history_and_reset_structure(
+        self,
+        project_id: str,
+        structure: VideoStructure | dict[str, Any],
+    ) -> dict[str, Any] | None:
+        with self.engine.begin() as connection:
+            result = connection.execute(
+                projects.update()
+                .where(projects.c.id == project_id)
+                .values(
+                    current_structure=_dump_structure(structure),
+                    undo_stack="[]",
+                    redo_stack="[]",
+                    updated_at=_utc_now(),
+                )
+            )
+        if result.rowcount == 0:
+            return None
+        return self.get_project(project_id)
 
     def get_project(self, project_id: str) -> dict[str, Any] | None:
         with self.engine.begin() as connection:
             row = connection.execute(select(projects).where(projects.c.id == project_id)).first()
         if row is None:
             return None
-        data = dict(row._mapping)
-        data["analysis_result"] = (
-            json.loads(data["analysis_result_json"])
-            if data.get("analysis_result_json")
-            else None
-        )
+        return self._project_row_to_dict(row._mapping)
+
+    def _project_row_to_dict(self, row: Any) -> dict[str, Any]:
+        data = dict(row)
+        data["description"] = data.get("description") or ""
+        data["analysis_result"] = _load_json(data.get("analysis_result_json"), None)
+        data["current_structure"] = _load_json(data.get("current_structure"), None)
+        data["undo_stack"] = _load_json(data.get("undo_stack"), [])
+        data["redo_stack"] = _load_json(data.get("redo_stack"), [])
         return data

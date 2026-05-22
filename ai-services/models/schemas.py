@@ -85,3 +85,34 @@ class TaskProgress(StrictModel):
 
 class AnalyzeResponse(StrictModel):
     job_id: str
+
+
+ProjectStatus = Literal["draft", "analyzing", "editing", "rendering", "completed"]
+
+
+class ProjectCreate(StrictModel):
+    name: str = Field(min_length=1)
+    description: str = ""
+
+
+class ProjectUpdate(StrictModel):
+    name: str | None = None
+    description: str | None = None
+
+
+class ProjectOut(StrictModel):
+    id: str
+    name: str
+    description: str
+    status: ProjectStatus
+    updatedAt: str
+
+
+class ReorderRequest(StrictModel):
+    order: list[str] = Field(min_length=1)
+
+
+class StructureActionResponse(StrictModel):
+    action: Literal["undo", "redo"]
+    available: bool
+    structure: VideoStructure

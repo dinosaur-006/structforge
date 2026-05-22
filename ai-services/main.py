@@ -5,6 +5,8 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from config import Settings
 from models.repository import SQLiteRepository
 from models.schemas import AnalyzeResponse, TaskProgress
+from routes.projects import build_projects_router
+from routes.structure import build_structure_router
 from services.uploads import (
     UploadValidationError,
     new_job_id,
@@ -23,6 +25,8 @@ def create_app() -> FastAPI:
     repository.initialize()
 
     app = FastAPI(title="StructForge AI Services", version="0.1.0")
+    app.include_router(build_projects_router(repository))
+    app.include_router(build_structure_router(repository))
 
     @app.get("/")
     @app.get("/health")
