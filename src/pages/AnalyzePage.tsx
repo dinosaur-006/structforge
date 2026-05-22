@@ -1,5 +1,5 @@
 import { Download, MoveRight } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AnalysisProgress } from '../components/analyze/AnalysisProgress';
 import { StructureTabs } from '../components/analyze/StructureTabs';
 import { VideoInfoCard } from '../components/analyze/VideoInfoCard';
@@ -11,19 +11,22 @@ import { useAppStore } from '../store';
 
 export default function AnalyzePage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const projectId = searchParams.get('projectId') ?? undefined;
   const videoFile = useAppStore((state) => state.videoFile);
   const setVideoFile = useAppStore((state) => state.setVideoFile);
   const isAnalyzing = useAppStore((state) => state.isAnalyzing);
   const progress = useAppStore((state) => state.progress);
   const stage = useAppStore((state) => state.stage);
   const analysisResult = useAppStore((state) => state.analysisResult);
+  const activeProjectId = useAppStore((state) => state.activeProjectId);
   const startAnalysis = useAppStore((state) => state.startAnalysis);
-  const loadProjectStructure = useAppStore((state) => state.loadProjectStructure);
   const addToast = useAppStore((state) => state.addToast);
 
   const goNext = () => {
-    loadProjectStructure('proj-1');
-    navigate('/migrate/proj-1');
+    const targetProjectId = activeProjectId ?? projectId;
+    if (!targetProjectId) return;
+    navigate(`/migrate/${targetProjectId}`);
   };
 
   return (
@@ -45,7 +48,7 @@ export default function AnalyzePage() {
         }
       />
 
-      <VideoUploader file={videoFile} onFile={setVideoFile} onStart={() => void startAnalysis()} disabled={isAnalyzing} />
+      <VideoUploader file={videoFile} onFile={setVideoFile} onStart={() => void startAnalysis(projectId)} disabled={isAnalyzing} />
       {isAnalyzing ? <AnalysisProgress progress={progress} stage={stage} /> : null}
       {analysisResult ? (
         <div className="space-y-5">

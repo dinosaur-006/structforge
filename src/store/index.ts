@@ -1,9 +1,9 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { api } from '../services/api';
 import { mockAnalysisResult } from '../mocks/analysisResult';
 import { mockAssets } from '../mocks/assets';
 import { mockGaps } from '../mocks/gaps';
-import { mockProjects } from '../mocks/projects';
 import { mockVersions } from '../mocks/versions';
 import { uid } from '../shared/format';
 import type { Asset, MaterialGap, Project, ResultVersion, ScriptSegment, ToastMessage, VideoStructure } from '../shared/types';
@@ -28,13 +28,15 @@ function initialState() {
     sidebarCollapsed: false,
     mobileSidebarOpen: false,
     routeLoading: false,
-    projects: [...mockProjects],
+    apiError: null as string | null,
+    activeProjectId: null as string | null,
+    projects: [] as Project[],
     videoFile: null,
     isAnalyzing: false,
     progress: 0,
     stage: analysisStages[0],
     analysisResult: null,
-    currentStructure: cloneStructure(mockAnalysisResult),
+    currentStructure: null,
     assets: [...mockAssets],
     gaps: cloneGaps(mockGaps),
     isFixing: false,
@@ -53,6 +55,8 @@ interface AppState {
   sidebarCollapsed: boolean;
   mobileSidebarOpen: boolean;
   routeLoading: boolean;
+  apiError: string | null;
+  activeProjectId: string | null;
   projects: Project[];
   videoFile: File | null;
   isAnalyzing: boolean;
@@ -74,22 +78,23 @@ interface AppState {
   toggleSidebar: () => void;
   setMobileSidebarOpen: (open: boolean) => void;
   setRouteLoading: (loading: boolean) => void;
-  addProject: (name: string, description: string) => string;
-  removeProject: (id: string) => void;
+  fetchProjects: () => Promise<void>;
+  addProject: (name: string, description: string) => Promise<string>;
+  removeProject: (id: string) => Promise<void>;
   findProject: (id: string) => Project | undefined;
   setVideoFile: (file: File | null) => void;
-  startAnalysis: () => Promise<void>;
+  startAnalysis: (projectId?: string) => Promise<string | undefined>;
   resetAnalysis: () => void;
   completeAnalysisNow: () => void;
-  loadProjectStructure: (projectId: string) => void;
-  updateSegment: (id: string, changes: Partial<ScriptSegment>) => void;
-  reorderSegments: (activeId: string, overId: string) => void;
-  removeSelectedSegment: () => void;
+  loadProjectStructure: (projectId: string) => Promise<void>;
+  updateSegment: (id: string, changes: Partial<ScriptSegment>) => Promise<void>;
+  reorderSegments: (activeId: string, overId: string) => Promise<void>;
+  removeSelectedSegment: () => Promise<void>;
   selectSegment: (id: string | null) => void;
   setDrawerOpen: (open: boolean) => void;
-  undo: () => void;
-  redo: () => void;
-  resetStructure: () => void;
+  undo: () => Promise<void>;
+  redo: () => Promise<void>;
+  resetStructure: () => Promise<void>;
   fixGaps: () => Promise<void>;
   setVersion: (id: string) => void;
   exportResult: () => Promise<void>;
@@ -98,12 +103,16 @@ interface AppState {
   resetForTest: () => void;
 }
 
-function pushHistory(state: AppState): Pick<AppState, 'history' | 'future'> {
-  if (!state.currentStructure) return { history: state.history, future: [] };
-  return {
-    history: [...state.history.slice(-19), cloneStructure(state.currentStructure)],
-    future: [],
-  };
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : '\u672a\u77e5\u9519\u8bef';
+}
+
+function projectNameFromFile(file: File): string {
+  return file.name.replace(/\.[^.]+$/, '') || '\u672a\u547d\u540d\u9879\u76ee';
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 export const useAppStore = create<AppState>()(
@@ -113,42 +122,97 @@ export const useAppStore = create<AppState>()(
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
       setMobileSidebarOpen: (open) => set({ mobileSidebarOpen: open }),
       setRouteLoading: (loading) => set({ routeLoading: loading }),
-      addProject: (name, description) => {
-        const id = uid('proj');
-        const project: Project = {
-          id,
-          name,
-          description,
-          status: 'draft',
-          updatedAt: new Date().toISOString(),
-        };
-        set((state) => ({ projects: [project, ...state.projects] }));
-        return id;
+      fetchProjects: async () => {
+        set({ routeLoading: true, apiError: null });
+        try {
+          const projects = await api.listProjects();
+          set({ projects });
+        } catch (error) {
+          const message = getErrorMessage(error);
+          set({ apiError: message });
+          get().addToast({ tone: 'error', title: '\u9879\u76ee\u52a0\u8f7d\u5931\u8d25', description: message });
+        } finally {
+          set({ routeLoading: false });
+        }
       },
-      removeProject: (id) => set((state) => ({ projects: state.projects.filter((project) => project.id !== id) })),
+      addProject: async (name, description) => {
+        set({ routeLoading: true, apiError: null });
+        try {
+          const project = await api.createProject({ name, description });
+          set((state) => ({ projects: [project, ...state.projects], activeProjectId: project.id }));
+          return project.id;
+        } catch (error) {
+          const message = getErrorMessage(error);
+          set({ apiError: message });
+          get().addToast({ tone: 'error', title: '\u9879\u76ee\u521b\u5efa\u5931\u8d25', description: message });
+          return '';
+        } finally {
+          set({ routeLoading: false });
+        }
+      },
+      removeProject: async (id) => {
+        set({ routeLoading: true, apiError: null });
+        try {
+          await api.deleteProject(id);
+          set((state) => ({
+            projects: state.projects.filter((project) => project.id !== id),
+            activeProjectId: state.activeProjectId === id ? null : state.activeProjectId,
+          }));
+        } catch (error) {
+          const message = getErrorMessage(error);
+          set({ apiError: message });
+          get().addToast({ tone: 'error', title: '\u9879\u76ee\u5220\u9664\u5931\u8d25', description: message });
+        } finally {
+          set({ routeLoading: false });
+        }
+      },
       findProject: (id) => get().projects.find((project) => project.id === id),
       setVideoFile: (file) => set({ videoFile: file }),
-      startAnalysis: () =>
-        new Promise((resolve) => {
-          set({ isAnalyzing: true, progress: 0, stage: analysisStages[0], analysisResult: null });
-          let tick = 0;
-          const timer = window.setInterval(() => {
-            tick += 1;
-            const nextProgress = Math.min(100, tick * 20);
-            const stage = analysisStages[Math.min(analysisStages.length - 1, Math.floor(nextProgress / 30))];
-            set({ progress: nextProgress, stage });
-            if (nextProgress >= 100) {
-              window.clearInterval(timer);
+      startAnalysis: async (projectId) => {
+        const file = get().videoFile;
+        if (!file) {
+          get().addToast({ tone: 'error', title: '\u8bf7\u5148\u9009\u62e9\u89c6\u9891' });
+          return undefined;
+        }
+
+        set({ isAnalyzing: true, progress: 0, stage: analysisStages[0], analysisResult: null, apiError: null });
+        let targetProjectId = projectId || get().activeProjectId || '';
+
+        try {
+          if (!targetProjectId) {
+            targetProjectId = await get().addProject(projectNameFromFile(file), '');
+          }
+          if (!targetProjectId) throw new Error('\u9879\u76ee\u521b\u5efa\u5931\u8d25');
+
+          set({ activeProjectId: targetProjectId });
+          const job = await api.startAnalysis(file, targetProjectId);
+
+          for (;;) {
+            const status = await api.getAnalysis(job.job_id);
+            set({ progress: status.progress, stage: status.stage });
+            if (status.status === 'completed') {
+              if (!status.result) throw new Error('\u5206\u6790\u7ed3\u679c\u4e3a\u7a7a');
               set({
                 isAnalyzing: false,
-                analysisResult: cloneStructure(mockAnalysisResult),
-                currentStructure: cloneStructure(mockAnalysisResult),
+                progress: 100,
+                analysisResult: status.result,
+                currentStructure: status.result,
+                activeProjectId: targetProjectId,
                 gaps: cloneGaps(mockGaps),
               });
-              resolve();
+              await get().fetchProjects();
+              return targetProjectId;
             }
-          }, 1000);
-        }),
+            if (status.status === 'failed') throw new Error(status.error || '\u5206\u6790\u5931\u8d25');
+            await wait(1000);
+          }
+        } catch (error) {
+          const message = getErrorMessage(error);
+          set({ isAnalyzing: false, apiError: message });
+          get().addToast({ tone: 'error', title: '\u5206\u6790\u5931\u8d25', description: message });
+          return undefined;
+        }
+      },
       resetAnalysis: () => set({ videoFile: null, isAnalyzing: false, progress: 0, stage: analysisStages[0], analysisResult: null }),
       completeAnalysisNow: () =>
         set({
@@ -158,74 +222,96 @@ export const useAppStore = create<AppState>()(
           analysisResult: cloneStructure(mockAnalysisResult),
           currentStructure: cloneStructure(mockAnalysisResult),
         }),
-      loadProjectStructure: () =>
-        set((state) => ({
-          currentStructure: state.currentStructure ?? cloneStructure(mockAnalysisResult),
-          gaps: state.gaps.length ? state.gaps : cloneGaps(mockGaps),
-          assets: state.assets.length ? state.assets : [...mockAssets],
-        })),
-      updateSegment: (id, changes) =>
-        set((state) => {
-          if (!state.currentStructure) return state;
-          const historyPatch = pushHistory(state);
-          const script = state.currentStructure.script.map((segment) => (segment.id === id ? { ...segment, ...changes } : segment));
-          return {
-            ...historyPatch,
-            currentStructure: { ...state.currentStructure, script },
-          };
-        }),
-      reorderSegments: (activeId, overId) =>
-        set((state) => {
-          if (!state.currentStructure || activeId === overId) return state;
-          const oldIndex = state.currentStructure.script.findIndex((segment) => segment.id === activeId);
-          const newIndex = state.currentStructure.script.findIndex((segment) => segment.id === overId);
-          if (oldIndex < 0 || newIndex < 0) return state;
-          const next = [...state.currentStructure.script];
-          const [moved] = next.splice(oldIndex, 1);
-          next.splice(newIndex, 0, moved);
-          return {
-            ...pushHistory(state),
-            currentStructure: { ...state.currentStructure, script: next },
-          };
-        }),
-      removeSelectedSegment: () =>
-        set((state) => {
-          if (!state.currentStructure || !state.selectedSegmentId) return state;
-          const selected = state.currentStructure.script.find((segment) => segment.id === state.selectedSegmentId);
-          if (!selected || selected.locked) return state;
-          return {
-            ...pushHistory(state),
-            currentStructure: {
-              ...state.currentStructure,
-              script: state.currentStructure.script.filter((segment) => segment.id !== state.selectedSegmentId),
-            },
-            selectedSegmentId: null,
-            drawerOpen: false,
-          };
-        }),
+      loadProjectStructure: async (projectId) => {
+        set({ routeLoading: true, apiError: null, activeProjectId: projectId });
+        try {
+          const structure = await api.getStructure(projectId);
+          set({
+            currentStructure: structure,
+            gaps: get().gaps.length ? get().gaps : cloneGaps(mockGaps),
+            assets: get().assets.length ? get().assets : [...mockAssets],
+          });
+        } catch (error) {
+          const message = getErrorMessage(error);
+          set({ apiError: message, currentStructure: null });
+          get().addToast({ tone: 'error', title: '\u7ed3\u6784\u52a0\u8f7d\u5931\u8d25', description: message });
+          throw error;
+        } finally {
+          set({ routeLoading: false });
+        }
+      },
+      updateSegment: async (id, changes) => {
+        const projectId = get().activeProjectId;
+        if (!projectId) return;
+        try {
+          const currentStructure = await api.updateSegment(projectId, id, changes);
+          set({ currentStructure });
+        } catch (error) {
+          get().addToast({ tone: 'error', title: '\u5206\u955c\u66f4\u65b0\u5931\u8d25', description: getErrorMessage(error) });
+        }
+      },
+      reorderSegments: async (activeId, overId) => {
+        const { activeProjectId, currentStructure } = get();
+        if (!activeProjectId || !currentStructure || activeId === overId) return;
+        const oldIndex = currentStructure.script.findIndex((segment) => segment.id === activeId);
+        const newIndex = currentStructure.script.findIndex((segment) => segment.id === overId);
+        if (oldIndex < 0 || newIndex < 0) return;
+        const next = [...currentStructure.script];
+        const [moved] = next.splice(oldIndex, 1);
+        next.splice(newIndex, 0, moved);
+        try {
+          const structure = await api.reorderSegments(activeProjectId, next.map((segment) => segment.id));
+          set({ currentStructure: structure });
+        } catch (error) {
+          get().addToast({ tone: 'error', title: '\u5206\u955c\u91cd\u6392\u5931\u8d25', description: getErrorMessage(error) });
+        }
+      },
+      removeSelectedSegment: async () => {
+        const { activeProjectId, currentStructure, selectedSegmentId } = get();
+        if (!activeProjectId || !currentStructure || !selectedSegmentId) return;
+        const selected = currentStructure.script.find((segment) => segment.id === selectedSegmentId);
+        if (!selected || selected.locked) return;
+        try {
+          const structure = await api.deleteSegment(activeProjectId, selectedSegmentId);
+          set({ currentStructure: structure, selectedSegmentId: null, drawerOpen: false });
+        } catch (error) {
+          get().addToast({ tone: 'error', title: '\u5206\u955c\u5220\u9664\u5931\u8d25', description: getErrorMessage(error) });
+        }
+      },
       selectSegment: (id) => set({ selectedSegmentId: id, drawerOpen: Boolean(id) }),
       setDrawerOpen: (open) => set({ drawerOpen: open }),
-      undo: () =>
-        set((state) => {
-          const previous = state.history.at(-1);
-          if (!previous || !state.currentStructure) return state;
-          return {
-            currentStructure: cloneStructure(previous),
-            history: state.history.slice(0, -1),
-            future: [cloneStructure(state.currentStructure), ...state.future],
-          };
-        }),
-      redo: () =>
-        set((state) => {
-          const next = state.future[0];
-          if (!next || !state.currentStructure) return state;
-          return {
-            currentStructure: cloneStructure(next),
-            history: [...state.history, cloneStructure(state.currentStructure)].slice(-20),
-            future: state.future.slice(1),
-          };
-        }),
-      resetStructure: () => set((state) => ({ ...pushHistory(state), currentStructure: cloneStructure(mockAnalysisResult), gaps: cloneGaps(mockGaps) })),
+      undo: async () => {
+        const projectId = get().activeProjectId;
+        if (!projectId) return;
+        try {
+          const response = await api.undo(projectId);
+          set({ currentStructure: response.structure });
+          if (!response.available) get().addToast({ tone: 'info', title: '\u6ca1\u6709\u53ef\u64a4\u9500\u7684\u64cd\u4f5c' });
+        } catch (error) {
+          get().addToast({ tone: 'error', title: '\u64a4\u9500\u5931\u8d25', description: getErrorMessage(error) });
+        }
+      },
+      redo: async () => {
+        const projectId = get().activeProjectId;
+        if (!projectId) return;
+        try {
+          const response = await api.redo(projectId);
+          set({ currentStructure: response.structure });
+          if (!response.available) get().addToast({ tone: 'info', title: '\u6ca1\u6709\u53ef\u91cd\u505a\u7684\u64cd\u4f5c' });
+        } catch (error) {
+          get().addToast({ tone: 'error', title: '\u91cd\u505a\u5931\u8d25', description: getErrorMessage(error) });
+        }
+      },
+      resetStructure: async () => {
+        const projectId = get().activeProjectId;
+        if (!projectId) return;
+        try {
+          const currentStructure = await api.resetStructure(projectId);
+          set({ currentStructure, gaps: cloneGaps(mockGaps) });
+        } catch (error) {
+          get().addToast({ tone: 'error', title: '\u91cd\u7f6e\u5931\u8d25', description: getErrorMessage(error) });
+        }
+      },
       fixGaps: () =>
         new Promise((resolve) => {
           set({ isFixing: true });
@@ -268,10 +354,16 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'structforge-app-store',
+      version: 2,
+      migrate: (persisted) => {
+        const state = persisted as Partial<AppState>;
+        return {
+          sidebarCollapsed: Boolean(state.sidebarCollapsed),
+          currentVersionId: state.currentVersionId ?? 'original',
+        };
+      },
       partialize: (state) => ({
         sidebarCollapsed: state.sidebarCollapsed,
-        projects: state.projects,
-        currentStructure: state.currentStructure,
         currentVersionId: state.currentVersionId,
       }),
     },

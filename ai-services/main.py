@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 
 from config import Settings
 from models.repository import SQLiteRepository
@@ -25,6 +26,13 @@ def create_app() -> FastAPI:
     repository.initialize()
 
     app = FastAPI(title="StructForge AI Services", version="0.1.0")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.include_router(build_projects_router(repository))
     app.include_router(build_structure_router(repository))
 

@@ -15,6 +15,9 @@ export default function MigratePage() {
   const { projectId = '' } = useParams();
   const navigate = useNavigate();
   const [style, setStyle] = useState('fast');
+  const [structureChecked, setStructureChecked] = useState(false);
+  const fetchProjects = useAppStore((state) => state.fetchProjects);
+  const routeLoading = useAppStore((state) => state.routeLoading);
   const findProject = useAppStore((state) => state.findProject);
   const project = findProject(projectId);
   const loadProjectStructure = useAppStore((state) => state.loadProjectStructure);
@@ -36,19 +39,35 @@ export default function MigratePage() {
   const removeSelectedSegment = useAppStore((state) => state.removeSelectedSegment);
 
   useEffect(() => {
-    if (project) loadProjectStructure(project.id);
-  }, [loadProjectStructure, project]);
+    let cancelled = false;
+    async function load() {
+      if (!projectId) return;
+      setStructureChecked(false);
+      if (!useAppStore.getState().projects.length) await fetchProjects();
+      try {
+        await loadProjectStructure(projectId);
+      } catch {
+        // Store owns toast/error state. The page switches to the missing-project alert below.
+      } finally {
+        if (!cancelled) setStructureChecked(true);
+      }
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchProjects, loadProjectStructure, projectId]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'z') {
         event.preventDefault();
-        redo();
+        void redo();
       } else if (event.ctrlKey && event.key.toLowerCase() === 'z') {
         event.preventDefault();
-        undo();
+        void undo();
       } else if (event.key === 'Delete') {
-        removeSelectedSegment();
+        void removeSelectedSegment();
       }
     };
     window.addEventListener('keydown', onKey);
@@ -60,7 +79,9 @@ export default function MigratePage() {
     [currentStructure, selectedSegmentId],
   );
 
-  if (!project) {
+  if (!currentStructure && !structureChecked && routeLoading) return null;
+
+  if (!currentStructure && structureChecked) {
     return <ErrorAlert title={'\u9879\u76ee\u4e0d\u5b58\u5728'} description={'\u8bf7\u56de\u5230\u9879\u76ee\u5217\u8868\u9009\u62e9\u6709\u6548\u9879\u76ee'} action={<Button onClick={() => navigate('/projects')}>{'\u8fd4\u56de\u9879\u76ee\u5217\u8868'}</Button>} />;
   }
 
@@ -70,11 +91,11 @@ export default function MigratePage() {
     <section className="mx-auto max-w-[1240px] space-y-6">
       <SectionHeader
         title={copy.migrateTitle}
-        description={`${'\u9879\u76ee\uff1a'}${project.name}`}
+        description={`${'\u9879\u76ee\uff1a'}${project?.name ?? projectId}`}
         action={
           <div className="flex flex-wrap gap-3">
-            <Button variant="secondary" onClick={() => navigate(`/result/${project.id}`)}>{copy.previewResult}</Button>
-            <Button variant="primary" onClick={() => navigate(`/result/${project.id}`)}>{copy.generateVideo}</Button>
+            <Button variant="secondary" onClick={() => navigate(`/result/${projectId}`)}>{copy.previewResult}</Button>
+            <Button variant="primary" onClick={() => navigate(`/result/${projectId}`)}>{copy.generateVideo}</Button>
           </div>
         }
       />
@@ -82,9 +103,9 @@ export default function MigratePage() {
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card p-3 shadow-sm">
         <div className="flex flex-wrap gap-2">
           <Button variant="ghost" onClick={() => addToast({ tone: 'success', title: '\u4fdd\u5b58\u6210\u529f' })}><Save className="h-4 w-4" />{'\u4fdd\u5b58'}</Button>
-          <Button variant="ghost" onClick={undo}><Undo2 className="h-4 w-4" />{'\u64a4\u9500'}</Button>
-          <Button variant="ghost" onClick={redo}><Redo2 className="h-4 w-4" />{'\u91cd\u505a'}</Button>
-          <Button variant="ghost" onClick={resetStructure}><RotateCcw className="h-4 w-4" />{'\u91cd\u7f6e'}</Button>
+          <Button variant="ghost" onClick={() => void undo()}><Undo2 className="h-4 w-4" />{'\u64a4\u9500'}</Button>
+          <Button variant="ghost" onClick={() => void redo()}><Redo2 className="h-4 w-4" />{'\u91cd\u505a'}</Button>
+          <Button variant="ghost" onClick={() => void resetStructure()}><RotateCcw className="h-4 w-4" />{'\u91cd\u7f6e'}</Button>
         </div>
         <label className="flex items-center gap-2 text-sm text-text-secondary">
           <WandSparkles className="h-4 w-4 text-primary" />
@@ -99,10 +120,10 @@ export default function MigratePage() {
 
       <div className="grid gap-5 lg:grid-cols-[16rem,1fr]">
         <AssetPanel assets={assets} />
-        <TimelineEditor segments={currentStructure.script} gaps={gaps} onSelect={selectSegment} onReorder={reorderSegments} />
+        <TimelineEditor segments={currentStructure.script} gaps={gaps} onSelect={selectSegment} onReorder={(activeId, overId) => void reorderSegments(activeId, overId)} />
       </div>
       <GapPanel gaps={gaps} isFixing={isFixing} onFixAll={() => void fixGaps()} />
-      <SegmentDrawer open={drawerOpen} segment={selectedSegment} assets={assets} onClose={() => setDrawerOpen(false)} onApply={updateSegment} />
+      <SegmentDrawer open={drawerOpen} segment={selectedSegment} assets={assets} onClose={() => setDrawerOpen(false)} onApply={(id, changes) => void updateSegment(id, changes)} />
     </section>
   );
 }

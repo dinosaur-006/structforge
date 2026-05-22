@@ -1,5 +1,5 @@
 import { Circle, Film, MoreVertical, Plus, Trash2, Video } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -24,18 +24,24 @@ const labels = {
 export default function ProjectListPage() {
   const navigate = useNavigate();
   const projects = useAppStore((state) => state.projects);
+  const fetchProjects = useAppStore((state) => state.fetchProjects);
   const addProject = useAppStore((state) => state.addProject);
   const removeProject = useAppStore((state) => state.removeProject);
   const [modalOpen, setModalOpen] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
 
-  const createProject = () => {
+  useEffect(() => {
+    void fetchProjects();
+  }, [fetchProjects]);
+
+  const createProject = async () => {
     if (!name.trim()) return;
-    addProject(name.trim(), description.trim());
+    const projectId = await addProject(name.trim(), description.trim());
     setName('');
     setDescription('');
     setModalOpen(false);
+    if (projectId) navigate(`/analyze?projectId=${projectId}`);
   };
 
   return (
@@ -81,7 +87,7 @@ export default function ProjectListPage() {
                     className="absolute right-2 top-2 grid h-9 w-9 place-items-center rounded-lg border border-border bg-card text-text-secondary opacity-0 shadow-sm transition hover:text-error group-hover:opacity-100"
                     onClick={(event) => {
                       event.stopPropagation();
-                      removeProject(project.id);
+                      void removeProject(project.id);
                     }}
                   >
                     <Trash2 className="h-4 w-4" />
@@ -113,7 +119,7 @@ export default function ProjectListPage() {
             <Button variant="ghost" onClick={() => setModalOpen(false)}>
               {labels.cancel}
             </Button>
-            <Button variant="primary" onClick={createProject} disabled={!name.trim()}>
+            <Button variant="primary" onClick={() => void createProject()} disabled={!name.trim()}>
               {labels.create}
             </Button>
           </>

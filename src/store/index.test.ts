@@ -1,26 +1,94 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAppStore } from './index';
+import { mockAnalysisResult } from '../mocks/analysisResult';
+
+const project = {
+  id: 'proj-1',
+  name: 'Launch Clip',
+  description: 'Draft',
+  status: 'draft' as const,
+  updatedAt: '2026-05-23T00:00:00Z',
+};
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
 
 describe('app store', () => {
   beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn());
     useAppStore.getState().resetForTest();
   });
 
-  it('creates and removes projects', () => {
-    const id = useAppStore.getState().addProject('Launch Clip', 'Draft');
-    expect(useAppStore.getState().projects.some((project) => project.id === id)).toBe(true);
-    useAppStore.getState().removeProject(id);
-    expect(useAppStore.getState().projects.some((project) => project.id === id)).toBe(false);
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
-  it('updates a segment and supports undo redo', () => {
-    useAppStore.getState().loadProjectStructure('proj-1');
-    useAppStore.getState().updateSegment('seg-hook', { duration: 4, end: 4 });
+  it('creates and removes projects through the API', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(jsonResponse(project))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    const id = await useAppStore.getState().addProject('Launch Clip', 'Draft');
+    expect(useAppStore.getState().projects.some((project) => project.id === id)).toBe(true);
+    await useAppStore.getState().removeProject(id);
+    expect(useAppStore.getState().projects.some((project) => project.id === id)).toBe(false);
+    expect(fetch).toHaveBeenCalledWith('http://127.0.0.1:8000/api/v1/projects', expect.objectContaining({ method: 'POST' }));
+  });
+
+  it('loads structure, updates a segment, and supports undo redo through the API', async () => {
+    const edited = {
+      ...mockAnalysisResult,
+      script: mockAnalysisResult.script.map((segment, index) => (index === 0 ? { ...segment, duration: 4, end: 4 } : segment)),
+    };
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(jsonResponse(mockAnalysisResult))
+      .mockResolvedValueOnce(jsonResponse(edited))
+      .mockResolvedValueOnce(jsonResponse({ action: 'undo', available: true, structure: mockAnalysisResult }))
+      .mockResolvedValueOnce(jsonResponse({ action: 'redo', available: true, structure: edited }));
+
+    await useAppStore.getState().loadProjectStructure('proj-1');
+    await useAppStore.getState().updateSegment('seg-hook', { duration: 4, end: 4 });
     expect(useAppStore.getState().currentStructure?.script[0].duration).toBe(4);
-    useAppStore.getState().undo();
+    await useAppStore.getState().undo();
     expect(useAppStore.getState().currentStructure?.script[0].duration).toBe(3);
-    useAppStore.getState().redo();
+    await useAppStore.getState().redo();
     expect(useAppStore.getState().currentStructure?.script[0].duration).toBe(4);
+  });
+
+  it('keeps current structure when undo is unavailable', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(jsonResponse(mockAnalysisResult))
+      .mockResolvedValueOnce(jsonResponse({ action: 'undo', available: false, structure: mockAnalysisResult }));
+
+    await useAppStore.getState().loadProjectStructure('proj-1');
+    await useAppStore.getState().undo();
+
+    expect(useAppStore.getState().currentStructure?.meta.duration).toBe(mockAnalysisResult.meta.duration);
+    expect(useAppStore.getState().toasts.at(-1)?.tone).toBe('info');
+  });
+
+  it('uploads video and polls analysis until completion', async () => {
+    vi.useFakeTimers();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(jsonResponse(project))
+      .mockResolvedValueOnce(jsonResponse({ job_id: 'job-1' }))
+      .mockResolvedValueOnce(jsonResponse({ status: 'processing', progress: 25, stage: 'Extracting' }))
+      .mockResolvedValueOnce(jsonResponse({ status: 'completed', progress: 100, stage: 'Done', result: mockAnalysisResult }))
+      .mockResolvedValueOnce(jsonResponse([{ ...project, status: 'editing' }]));
+
+    useAppStore.getState().setVideoFile(new File(['video'], 'sample.mp4', { type: 'video/mp4' }));
+    const promise = useAppStore.getState().startAnalysis();
+    await vi.advanceTimersByTimeAsync(1100);
+    const projectId = await promise;
+
+    expect(projectId).toBe('proj-1');
+    expect(useAppStore.getState().analysisResult?.health.overall).toBe(mockAnalysisResult.health.overall);
+    expect(useAppStore.getState().isAnalyzing).toBe(false);
   });
 
   it('fixes gaps asynchronously', async () => {

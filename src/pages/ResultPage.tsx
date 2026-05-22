@@ -1,5 +1,5 @@
 import { Download } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { CompareRadar } from '../components/result/CompareRadar';
 import { ExportDialog } from '../components/result/ExportDialog';
@@ -17,6 +17,8 @@ export default function ResultPage() {
   const { projectId = '' } = useParams();
   const navigate = useNavigate();
   const [exportOpen, setExportOpen] = useState(false);
+  const [projectsChecked, setProjectsChecked] = useState(false);
+  const fetchProjects = useAppStore((state) => state.fetchProjects);
   const findProject = useAppStore((state) => state.findProject);
   const project = findProject(projectId);
   const versions = useAppStore((state) => state.versions);
@@ -26,6 +28,20 @@ export default function ResultPage() {
   const exportResult = useAppStore((state) => state.exportResult);
   const currentVersion = useMemo(() => versions.find((version) => version.id === currentVersionId) ?? versions[0], [currentVersionId, versions]);
   const original = versions[0];
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (!useAppStore.getState().projects.length) await fetchProjects();
+      if (!cancelled) setProjectsChecked(true);
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchProjects]);
+
+  if (!project && !projectsChecked) return null;
 
   if (!project) {
     return <ErrorAlert title={'\u9879\u76ee\u4e0d\u5b58\u5728'} description={'\u8bf7\u56de\u5230\u9879\u76ee\u5217\u8868\u9009\u62e9\u6709\u6548\u9879\u76ee'} action={<Button onClick={() => navigate('/projects')}>{'\u8fd4\u56de\u9879\u76ee\u5217\u8868'}</Button>} />;
