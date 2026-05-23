@@ -91,6 +91,21 @@ describe('app store', () => {
     expect(useAppStore.getState().isAnalyzing).toBe(false);
   });
 
+  it('stops polling and reports an error when analysis polling fails', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(jsonResponse(project))
+      .mockResolvedValueOnce(jsonResponse({ job_id: 'job-1' }))
+      .mockRejectedValueOnce(new Error('Network interrupted'));
+
+    useAppStore.getState().setVideoFile(new File(['video'], 'sample.mp4', { type: 'video/mp4' }));
+    const projectId = await useAppStore.getState().startAnalysis();
+
+    expect(projectId).toBeUndefined();
+    expect(useAppStore.getState().isAnalyzing).toBe(false);
+    expect(useAppStore.getState().apiError).toBe('Network interrupted');
+    expect(useAppStore.getState().toasts.at(-1)).toMatchObject({ tone: 'error', title: '分析失败' });
+  });
+
   it('fixes gaps asynchronously', async () => {
     vi.useFakeTimers();
     const promise = useAppStore.getState().fixGaps();
