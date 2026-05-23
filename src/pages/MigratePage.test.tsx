@@ -47,7 +47,9 @@ describe('MigratePage', () => {
       .mockResolvedValueOnce(jsonResponse([project]))
       .mockResolvedValueOnce(jsonResponse(mockAnalysisResult))
       .mockResolvedValueOnce(jsonResponse([]))
-      .mockResolvedValueOnce(jsonResponse(edited));
+      .mockResolvedValueOnce(jsonResponse({ gaps: [] }))
+      .mockResolvedValueOnce(jsonResponse(edited))
+      .mockResolvedValueOnce(jsonResponse({ gaps: [] }));
     const user = userEvent.setup();
     renderRoute('/migrate/proj-1');
     await user.click(await screen.findByRole('button', { name: /Hook/ }));

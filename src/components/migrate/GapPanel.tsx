@@ -8,10 +8,12 @@ interface GapPanelProps {
   gaps: MaterialGap[];
   isFixing: boolean;
   onFixAll: () => void;
+  onFixGap?: (gapId: string, strategy: string) => void;
 }
 
-export function GapPanel({ gaps, isFixing, onFixAll }: GapPanelProps) {
+export function GapPanel({ gaps, isFixing, onFixAll, onFixGap }: GapPanelProps) {
   const [open, setOpen] = useState(true);
+  const [selectedStrategies, setSelectedStrategies] = useState<Record<string, string>>({});
   const openGaps = gaps.filter((gap) => gap.status === 'open');
 
   return (
@@ -36,13 +38,23 @@ export function GapPanel({ gaps, isFixing, onFixAll }: GapPanelProps) {
                 {gap.strategies.map((strategy) => (
                   <label key={strategy.id} className="rounded-lg border border-border bg-sidebar/40 p-3 text-sm">
                     <span className="flex items-center gap-2 font-semibold">
-                      <input type="radio" checked={strategy.id === gap.selectedStrategyId} readOnly />
+                      <input
+                        type="radio"
+                        aria-label={strategy.name}
+                        checked={strategy.id === (selectedStrategies[gap.id] ?? gap.selectedStrategyId)}
+                        onChange={() => setSelectedStrategies((current) => ({ ...current, [gap.id]: strategy.id }))}
+                      />
                       {strategy.name}
                     </span>
                     <span className="mt-1 block text-text-secondary">{strategy.description}</span>
                   </label>
                 ))}
               </div>
+              {onFixGap ? (
+                <Button className="mt-3" variant="secondary" onClick={() => onFixGap(gap.id, selectedStrategies[gap.id] ?? gap.selectedStrategyId)} disabled={isFixing}>
+                  {'应用选中策略'}
+                </Button>
+              ) : null}
             </div>
           ))}
           <Button variant="primary" onClick={onFixAll} disabled={isFixing || openGaps.length === 0}>

@@ -8,6 +8,7 @@ export const mockGaps: MaterialGap[] = [
     description: 'Hook \u753b\u9762\u7f3a\u5931 - \u9700\u8981\u51b2\u7a81\u753b\u9762\u6216\u60ac\u5ff5\u5c55\u793a',
     requiredSlot: '0-3s',
     selectedStrategyId: 'reorder',
+    recommendedStrategy: 'reorder',
     status: 'open',
     strategies: [
       { id: 'reorder', name: '\u7ed3\u6784\u91cd\u6392', description: '\u5c06\u573a\u666f\u56fe\u524d\u7f6e\u5e76\u8c03\u6574\u5206\u955c\u987a\u5e8f' },
@@ -22,6 +23,7 @@ export const mockGaps: MaterialGap[] = [
     description: 'CTA \u80cc\u666f\u56fe\u7f3a\u5931 - \u9700\u8981\u8f6c\u5316\u573a\u666f\u6216\u4ef7\u683c\u89d2\u6807',
     requiredSlot: '24-35s',
     selectedStrategyId: 'packaging',
+    recommendedStrategy: 'packaging',
     status: 'open',
     strategies: [
       { id: 'packaging', name: '\u5305\u88c5\u8865\u5168', description: '\u7528\u4ef7\u683c\u5361\u548c\u7bad\u5934\u5f3a\u5316\u8f6c\u5316' },

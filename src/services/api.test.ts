@@ -64,6 +64,28 @@ describe('api client', () => {
     expect(init?.body).toBeInstanceOf(FormData);
   });
 
+  it('calls gap detection and fix endpoints', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ gaps: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ fixed_count: 0, details: [], gaps: [], assets: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+    await api.listGaps('proj-1');
+    await api.fixAllGaps('proj-1');
+
+    expect(fetch).toHaveBeenNthCalledWith(1, 'http://127.0.0.1:8000/api/v1/gaps/proj-1', {});
+    expect(fetch).toHaveBeenNthCalledWith(2, 'http://127.0.0.1:8000/api/v1/gaps/proj-1/fix-all', { method: 'POST' });
+  });
+
   it('throws readable FastAPI errors', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(JSON.stringify({ detail: 'Project not found' }), {

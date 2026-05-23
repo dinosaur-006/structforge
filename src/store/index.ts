@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { api } from '../services/api';
 import { mockAnalysisResult } from '../mocks/analysisResult';
-import { mockGaps } from '../mocks/gaps';
 import { mockVersions } from '../mocks/versions';
 import { uid } from '../shared/format';
 import type { Asset, MaterialGap, Project, ResultVersion, ScriptSegment, ToastMessage, VideoStructure } from '../shared/types';
@@ -16,10 +15,6 @@ const analysisStages = [
 
 function cloneStructure(structure: VideoStructure): VideoStructure {
   return JSON.parse(JSON.stringify(structure)) as VideoStructure;
-}
-
-function cloneGaps(gaps: MaterialGap[]): MaterialGap[] {
-  return JSON.parse(JSON.stringify(gaps)) as MaterialGap[];
 }
 
 function initialState() {
@@ -38,7 +33,8 @@ function initialState() {
     currentStructure: null,
     assets: [] as Asset[],
     assetLoading: false,
-    gaps: cloneGaps(mockGaps),
+    gapLoading: false,
+    gaps: [] as MaterialGap[],
     isFixing: false,
     selectedSegmentId: null,
     drawerOpen: false,
@@ -66,6 +62,7 @@ interface AppState {
   currentStructure: VideoStructure | null;
   assets: Asset[];
   assetLoading: boolean;
+  gapLoading: boolean;
   gaps: MaterialGap[];
   isFixing: boolean;
   selectedSegmentId: string | null;
@@ -90,6 +87,9 @@ interface AppState {
   loadProjectStructure: (projectId: string) => Promise<void>;
   fetchAssets: (projectId: string) => Promise<void>;
   uploadAsset: (file: File) => Promise<void>;
+  fetchGaps: (projectId: string) => Promise<void>;
+  fixGap: (gapId: string, strategy: string) => Promise<void>;
+  fixAllGaps: () => Promise<void>;
   updateSegment: (id: string, changes: Partial<ScriptSegment>) => Promise<void>;
   reorderSegments: (activeId: string, overId: string) => Promise<void>;
   removeSelectedSegment: () => Promise<void>;
@@ -201,7 +201,7 @@ export const useAppStore = create<AppState>()(
                 analysisResult: status.result,
                 currentStructure: status.result,
                 activeProjectId: targetProjectId,
-                gaps: cloneGaps(mockGaps),
+                gaps: [],
               });
               await get().fetchProjects();
               return targetProjectId;
@@ -230,9 +230,10 @@ export const useAppStore = create<AppState>()(
         try {
           const structure = await api.getStructure(projectId);
           const assets = await api.listAssets(projectId);
+          const gapResponse = await api.listGaps(projectId);
           set({
             currentStructure: structure,
-            gaps: get().gaps.length ? get().gaps : cloneGaps(mockGaps),
+            gaps: gapResponse.gaps,
             assets,
           });
         } catch (error) {
@@ -268,7 +269,8 @@ export const useAppStore = create<AppState>()(
           await api.analyzeAsset(projectId, file);
           await api.matchAssets(projectId);
           const assets = await api.listAssets(projectId);
-          set({ assets });
+          const gapResponse = await api.listGaps(projectId);
+          set({ assets, gaps: gapResponse.gaps });
         } catch (error) {
           const message = getErrorMessage(error);
           set({ apiError: message });
@@ -277,12 +279,64 @@ export const useAppStore = create<AppState>()(
           set({ assetLoading: false });
         }
       },
+      fetchGaps: async (projectId) => {
+        set({ gapLoading: true, apiError: null, activeProjectId: projectId });
+        try {
+          const response = await api.listGaps(projectId);
+          set({ gaps: response.gaps });
+        } catch (error) {
+          const message = getErrorMessage(error);
+          set({ apiError: message });
+          get().addToast({ tone: 'error', title: '\u7f3a\u53e3\u52a0\u8f7d\u5931\u8d25', description: message });
+        } finally {
+          set({ gapLoading: false });
+        }
+      },
+      fixGap: async (gapId, strategy) => {
+        const projectId = get().activeProjectId;
+        if (!projectId) return;
+        set({ isFixing: true, gapLoading: true, apiError: null });
+        try {
+          const response = await api.fixGap(projectId, gapId, strategy);
+          set({
+            currentStructure: response.updated_structure ?? get().currentStructure,
+            assets: response.assets ?? get().assets,
+            gaps: response.gaps ?? get().gaps,
+          });
+        } catch (error) {
+          const message = getErrorMessage(error);
+          set({ apiError: message });
+          get().addToast({ tone: 'error', title: '\u7f3a\u53e3\u4fee\u590d\u5931\u8d25', description: message });
+        } finally {
+          set({ isFixing: false, gapLoading: false });
+        }
+      },
+      fixAllGaps: async () => {
+        const projectId = get().activeProjectId;
+        if (!projectId) return;
+        set({ isFixing: true, gapLoading: true, apiError: null });
+        try {
+          const response = await api.fixAllGaps(projectId);
+          set({
+            currentStructure: response.updated_structure ?? get().currentStructure,
+            assets: response.assets ?? get().assets,
+            gaps: response.gaps,
+          });
+        } catch (error) {
+          const message = getErrorMessage(error);
+          set({ apiError: message });
+          get().addToast({ tone: 'error', title: '\u4e00\u952e\u4fee\u590d\u5931\u8d25', description: message });
+        } finally {
+          set({ isFixing: false, gapLoading: false });
+        }
+      },
       updateSegment: async (id, changes) => {
         const projectId = get().activeProjectId;
         if (!projectId) return;
         try {
           const currentStructure = await api.updateSegment(projectId, id, changes);
           set({ currentStructure });
+          await get().fetchGaps(projectId);
         } catch (error) {
           get().addToast({ tone: 'error', title: '\u5206\u955c\u66f4\u65b0\u5931\u8d25', description: getErrorMessage(error) });
         }
@@ -299,6 +353,7 @@ export const useAppStore = create<AppState>()(
         try {
           const structure = await api.reorderSegments(activeProjectId, next.map((segment) => segment.id));
           set({ currentStructure: structure });
+          await get().fetchGaps(activeProjectId);
         } catch (error) {
           get().addToast({ tone: 'error', title: '\u5206\u955c\u91cd\u6392\u5931\u8d25', description: getErrorMessage(error) });
         }
@@ -311,6 +366,7 @@ export const useAppStore = create<AppState>()(
         try {
           const structure = await api.deleteSegment(activeProjectId, selectedSegmentId);
           set({ currentStructure: structure, selectedSegmentId: null, drawerOpen: false });
+          await get().fetchGaps(activeProjectId);
         } catch (error) {
           get().addToast({ tone: 'error', title: '\u5206\u955c\u5220\u9664\u5931\u8d25', description: getErrorMessage(error) });
         }
@@ -344,33 +400,13 @@ export const useAppStore = create<AppState>()(
         if (!projectId) return;
         try {
           const currentStructure = await api.resetStructure(projectId);
-          set({ currentStructure, gaps: cloneGaps(mockGaps) });
+          const gapResponse = await api.listGaps(projectId);
+          set({ currentStructure, gaps: gapResponse.gaps });
         } catch (error) {
           get().addToast({ tone: 'error', title: '\u91cd\u7f6e\u5931\u8d25', description: getErrorMessage(error) });
         }
       },
-      fixGaps: () =>
-        new Promise((resolve) => {
-          set({ isFixing: true });
-          window.setTimeout(() => {
-            set((state) => ({
-              isFixing: false,
-              gaps: state.gaps.map((gap) => ({ ...gap, status: 'fixed' })),
-              currentStructure: state.currentStructure
-                ? {
-                    ...state.currentStructure,
-                    script: state.currentStructure.script.map((segment) =>
-                      ['seg-hook', 'seg-cta'].includes(segment.id)
-                        ? { ...segment, healthScore: Math.max(segment.healthScore, segment.id === 'seg-hook' ? 86 : 78) }
-                        : segment,
-                    ),
-                  }
-                : state.currentStructure,
-            }));
-            get().addToast({ tone: 'success', title: '\u4fee\u590d\u5b8c\u6210', description: '\u7d20\u6750\u7f3a\u53e3\u5df2\u8865\u5168' });
-            resolve();
-          }, 2000);
-        }),
+      fixGaps: () => get().fixAllGaps(),
       setVersion: (id) => set({ currentVersionId: id }),
       exportResult: () =>
         new Promise((resolve) => {

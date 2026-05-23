@@ -20,6 +20,18 @@ const textAsset = {
   color: '#5C8B67',
 };
 
+const openGap = {
+  id: 'gap-seg-1',
+  segmentId: 'seg-1',
+  severity: 'critical' as const,
+  description: 'Hook 素材缺口',
+  requiredSlot: '0-3s Hook 画面',
+  selectedStrategyId: 'packaging',
+  recommendedStrategy: 'packaging',
+  status: 'open' as const,
+  strategies: [{ id: 'packaging', name: '包装补全', description: '生成包装图' }],
+};
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -58,7 +70,9 @@ describe('app store', () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(jsonResponse(mockAnalysisResult))
       .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse({ gaps: [] }))
       .mockResolvedValueOnce(jsonResponse(edited))
+      .mockResolvedValueOnce(jsonResponse({ gaps: [] }))
       .mockResolvedValueOnce(jsonResponse({ action: 'undo', available: true, structure: mockAnalysisResult }))
       .mockResolvedValueOnce(jsonResponse({ action: 'redo', available: true, structure: edited }));
 
@@ -75,6 +89,7 @@ describe('app store', () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(jsonResponse(mockAnalysisResult))
       .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse({ gaps: [] }))
       .mockResolvedValueOnce(jsonResponse({ action: 'undo', available: false, structure: mockAnalysisResult }));
 
     await useAppStore.getState().loadProjectStructure('proj-1');
@@ -88,13 +103,32 @@ describe('app store', () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(jsonResponse({ asset_id: 'asset-text', analysis: { description: '优惠购买' } }))
       .mockResolvedValueOnce(jsonResponse({ matches: [{ asset_id: 'asset-text', segment_id: 'seg-3', score: 91, status: 'matched' }] }))
-      .mockResolvedValueOnce(jsonResponse([textAsset]));
+      .mockResolvedValueOnce(jsonResponse([textAsset]))
+      .mockResolvedValueOnce(jsonResponse({ gaps: [] }));
 
     useAppStore.setState({ activeProjectId: 'proj-1' });
     await useAppStore.getState().uploadAsset(new File(['优惠购买'], 'offer.txt', { type: 'text/plain' }));
 
     expect(useAppStore.getState().assets).toEqual([textAsset]);
     expect(useAppStore.getState().assetLoading).toBe(false);
+  });
+
+  it('fetches gaps and fixes all gaps through the API', async () => {
+    const fixedStructure = {
+      ...mockAnalysisResult,
+      script: mockAnalysisResult.script.map((segment, index) => (index === 0 ? { ...segment, assetId: 'asset-fill' } : segment)),
+    };
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(jsonResponse({ gaps: [openGap] }))
+      .mockResolvedValueOnce(jsonResponse({ fixed_count: 1, details: [], gaps: [], updated_structure: fixedStructure, assets: [textAsset] }));
+
+    useAppStore.setState({ activeProjectId: 'proj-1', currentStructure: mockAnalysisResult });
+    await useAppStore.getState().fetchGaps('proj-1');
+    await useAppStore.getState().fixAllGaps();
+
+    expect(useAppStore.getState().gaps).toEqual([]);
+    expect(useAppStore.getState().assets).toEqual([textAsset]);
+    expect(useAppStore.getState().currentStructure?.script[0].assetId).toBe('asset-fill');
   });
 
   it('reports asset upload errors and clears loading state', async () => {

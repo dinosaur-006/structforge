@@ -36,6 +36,7 @@ export default function MigratePage() {
   const redo = useAppStore((state) => state.redo);
   const resetStructure = useAppStore((state) => state.resetStructure);
   const fixGaps = useAppStore((state) => state.fixGaps);
+  const fixGap = useAppStore((state) => state.fixGap);
   const addToast = useAppStore((state) => state.addToast);
   const removeSelectedSegment = useAppStore((state) => state.removeSelectedSegment);
   const uploadAsset = useAppStore((state) => state.uploadAsset);
@@ -124,7 +125,7 @@ export default function MigratePage() {
         <AssetPanel assets={assets} assetLoading={assetLoading} onUploadAsset={(file) => void uploadAsset(file)} />
         <TimelineEditor segments={currentStructure.script} gaps={gaps} onSelect={selectSegment} onReorder={(activeId, overId) => void reorderSegments(activeId, overId)} />
       </div>
-      <GapPanel gaps={gaps} isFixing={isFixing} onFixAll={() => void fixGaps()} />
+      <GapPanel gaps={gaps} isFixing={isFixing} onFixAll={() => void fixGaps()} onFixGap={(gapId, strategy) => void fixGap(gapId, strategy)} />
       <SegmentDrawer open={drawerOpen} segment={selectedSegment} assets={assets} onClose={() => setDrawerOpen(false)} onApply={(id, changes) => void updateSegment(id, changes)} />
     </section>
   );

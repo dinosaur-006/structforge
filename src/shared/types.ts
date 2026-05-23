@@ -94,6 +94,7 @@ export interface MaterialGap {
   description: string;
   requiredSlot: string;
   selectedStrategyId: string;
+  recommendedStrategy: string;
   strategies: GapStrategy[];
   status: GapStatus;
 }

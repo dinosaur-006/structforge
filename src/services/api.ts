@@ -1,4 +1,4 @@
-import type { Asset, MatchStatus, Project, ScriptSegment, VideoStructure } from '../shared/types';
+import type { Asset, MaterialGap, MatchStatus, Project, ScriptSegment, VideoStructure } from '../shared/types';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://127.0.0.1:8000';
 
@@ -37,6 +37,26 @@ export interface AssetAnalyzeResponse {
 
 export interface AssetMatchResponse {
   matches: Array<{ asset_id: string; segment_id: string; score: number; status: MatchStatus }>;
+}
+
+export interface GapListResponse {
+  gaps: MaterialGap[];
+}
+
+export interface GapFixResponse {
+  gap_id: string;
+  status: 'open' | 'fixed';
+  updated_structure?: VideoStructure;
+  assets?: Asset[];
+  gaps?: MaterialGap[];
+}
+
+export interface GapFixAllResponse {
+  fixed_count: number;
+  details: GapFixResponse[];
+  gaps: MaterialGap[];
+  updated_structure?: VideoStructure;
+  assets?: Asset[];
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -88,6 +108,10 @@ export const api = {
   },
   listAssets: (projectId: string) => request<Asset[]>(`/api/v1/assets/${projectId}`),
   matchAssets: (projectId: string) => request<AssetMatchResponse>(`/api/v1/assets/${projectId}/match`),
+  listGaps: (projectId: string) => request<GapListResponse>(`/api/v1/gaps/${projectId}`),
+  fixGap: (projectId: string, gapId: string, strategy: string) =>
+    request<GapFixResponse>(`/api/v1/gaps/${projectId}/fix`, { method: 'POST', body: JSON.stringify({ gap_id: gapId, strategy }) }),
+  fixAllGaps: (projectId: string) => request<GapFixAllResponse>(`/api/v1/gaps/${projectId}/fix-all`, { method: 'POST' }),
   getStructure: (projectId: string) => request<VideoStructure>(`/api/v1/structure/${projectId}`),
   replaceStructure: (projectId: string, structure: VideoStructure) =>
     request<VideoStructure>(`/api/v1/structure/${projectId}`, { method: 'PUT', body: JSON.stringify(structure) }),

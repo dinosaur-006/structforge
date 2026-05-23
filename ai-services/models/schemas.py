@@ -146,3 +146,51 @@ class AssetMatch(StrictModel):
 
 class AssetMatchResponse(StrictModel):
     matches: list[AssetMatch]
+
+
+GapSeverity = Literal["critical", "warning"]
+GapStatus = Literal["open", "fixed"]
+GapStrategyId = Literal["reorder", "packaging", "aigc", "recompose"]
+
+
+class GapStrategy(StrictModel):
+    id: GapStrategyId
+    name: str
+    description: str
+
+
+class MaterialGapOut(StrictModel):
+    id: str
+    segmentId: str
+    severity: GapSeverity
+    description: str
+    requiredSlot: str
+    selectedStrategyId: GapStrategyId
+    recommendedStrategy: GapStrategyId
+    strategies: list[GapStrategy]
+    status: GapStatus
+
+
+class GapListResponse(StrictModel):
+    gaps: list[MaterialGapOut]
+
+
+class GapFixRequest(StrictModel):
+    gap_id: str
+    strategy: str
+
+
+class GapFixResponse(StrictModel):
+    gap_id: str
+    status: GapStatus
+    updated_structure: VideoStructure | None = None
+    assets: list[AssetOut] = Field(default_factory=list)
+    gaps: list[MaterialGapOut] = Field(default_factory=list)
+
+
+class GapFixAllResponse(StrictModel):
+    fixed_count: int = Field(ge=0)
+    details: list[GapFixResponse]
+    gaps: list[MaterialGapOut]
+    updated_structure: VideoStructure | None = None
+    assets: list[AssetOut] = Field(default_factory=list)
