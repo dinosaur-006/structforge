@@ -10,6 +10,16 @@ const project = {
   updatedAt: '2026-05-23T00:00:00Z',
 };
 
+const textAsset = {
+  id: 'asset-text',
+  name: 'offer.txt',
+  type: 'text' as const,
+  tag: '优惠购买',
+  matchStatus: 'matched' as const,
+  matchScore: 91,
+  color: '#5C8B67',
+};
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -47,6 +57,7 @@ describe('app store', () => {
     };
     vi.mocked(fetch)
       .mockResolvedValueOnce(jsonResponse(mockAnalysisResult))
+      .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(jsonResponse(edited))
       .mockResolvedValueOnce(jsonResponse({ action: 'undo', available: true, structure: mockAnalysisResult }))
       .mockResolvedValueOnce(jsonResponse({ action: 'redo', available: true, structure: edited }));
@@ -63,6 +74,7 @@ describe('app store', () => {
   it('keeps current structure when undo is unavailable', async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(jsonResponse(mockAnalysisResult))
+      .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(jsonResponse({ action: 'undo', available: false, structure: mockAnalysisResult }));
 
     await useAppStore.getState().loadProjectStructure('proj-1');
@@ -70,6 +82,29 @@ describe('app store', () => {
 
     expect(useAppStore.getState().currentStructure?.meta.duration).toBe(mockAnalysisResult.meta.duration);
     expect(useAppStore.getState().toasts.at(-1)?.tone).toBe('info');
+  });
+
+  it('uploads an asset, refreshes matching, and stores returned assets', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(jsonResponse({ asset_id: 'asset-text', analysis: { description: '优惠购买' } }))
+      .mockResolvedValueOnce(jsonResponse({ matches: [{ asset_id: 'asset-text', segment_id: 'seg-3', score: 91, status: 'matched' }] }))
+      .mockResolvedValueOnce(jsonResponse([textAsset]));
+
+    useAppStore.setState({ activeProjectId: 'proj-1' });
+    await useAppStore.getState().uploadAsset(new File(['优惠购买'], 'offer.txt', { type: 'text/plain' }));
+
+    expect(useAppStore.getState().assets).toEqual([textAsset]);
+    expect(useAppStore.getState().assetLoading).toBe(false);
+  });
+
+  it('reports asset upload errors and clears loading state', async () => {
+    vi.mocked(fetch).mockRejectedValueOnce(new Error('Upload failed'));
+
+    useAppStore.setState({ activeProjectId: 'proj-1' });
+    await useAppStore.getState().uploadAsset(new File(['bad'], 'bad.txt', { type: 'text/plain' }));
+
+    expect(useAppStore.getState().assetLoading).toBe(false);
+    expect(useAppStore.getState().toasts.at(-1)).toMatchObject({ tone: 'error' });
   });
 
   it('uploads video and polls analysis until completion', async () => {

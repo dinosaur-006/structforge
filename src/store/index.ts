@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { api } from '../services/api';
 import { mockAnalysisResult } from '../mocks/analysisResult';
-import { mockAssets } from '../mocks/assets';
 import { mockGaps } from '../mocks/gaps';
 import { mockVersions } from '../mocks/versions';
 import { uid } from '../shared/format';
@@ -37,7 +36,8 @@ function initialState() {
     stage: analysisStages[0],
     analysisResult: null,
     currentStructure: null,
-    assets: [...mockAssets],
+    assets: [] as Asset[],
+    assetLoading: false,
     gaps: cloneGaps(mockGaps),
     isFixing: false,
     selectedSegmentId: null,
@@ -65,6 +65,7 @@ interface AppState {
   analysisResult: VideoStructure | null;
   currentStructure: VideoStructure | null;
   assets: Asset[];
+  assetLoading: boolean;
   gaps: MaterialGap[];
   isFixing: boolean;
   selectedSegmentId: string | null;
@@ -87,6 +88,8 @@ interface AppState {
   resetAnalysis: () => void;
   completeAnalysisNow: () => void;
   loadProjectStructure: (projectId: string) => Promise<void>;
+  fetchAssets: (projectId: string) => Promise<void>;
+  uploadAsset: (file: File) => Promise<void>;
   updateSegment: (id: string, changes: Partial<ScriptSegment>) => Promise<void>;
   reorderSegments: (activeId: string, overId: string) => Promise<void>;
   removeSelectedSegment: () => Promise<void>;
@@ -226,10 +229,11 @@ export const useAppStore = create<AppState>()(
         set({ routeLoading: true, apiError: null, activeProjectId: projectId });
         try {
           const structure = await api.getStructure(projectId);
+          const assets = await api.listAssets(projectId);
           set({
             currentStructure: structure,
             gaps: get().gaps.length ? get().gaps : cloneGaps(mockGaps),
-            assets: get().assets.length ? get().assets : [...mockAssets],
+            assets,
           });
         } catch (error) {
           const message = getErrorMessage(error);
@@ -238,6 +242,39 @@ export const useAppStore = create<AppState>()(
           throw error;
         } finally {
           set({ routeLoading: false });
+        }
+      },
+      fetchAssets: async (projectId) => {
+        set({ assetLoading: true, apiError: null, activeProjectId: projectId });
+        try {
+          const assets = await api.listAssets(projectId);
+          set({ assets });
+        } catch (error) {
+          const message = getErrorMessage(error);
+          set({ apiError: message });
+          get().addToast({ tone: 'error', title: '\u7d20\u6750\u52a0\u8f7d\u5931\u8d25', description: message });
+        } finally {
+          set({ assetLoading: false });
+        }
+      },
+      uploadAsset: async (file) => {
+        const projectId = get().activeProjectId;
+        if (!projectId) {
+          get().addToast({ tone: 'error', title: '\u8bf7\u5148\u9009\u62e9\u9879\u76ee' });
+          return;
+        }
+        set({ assetLoading: true, apiError: null });
+        try {
+          await api.analyzeAsset(projectId, file);
+          await api.matchAssets(projectId);
+          const assets = await api.listAssets(projectId);
+          set({ assets });
+        } catch (error) {
+          const message = getErrorMessage(error);
+          set({ apiError: message });
+          get().addToast({ tone: 'error', title: '\u7d20\u6750\u4e0a\u4f20\u5931\u8d25', description: message });
+        } finally {
+          set({ assetLoading: false });
         }
       },
       updateSegment: async (id, changes) => {

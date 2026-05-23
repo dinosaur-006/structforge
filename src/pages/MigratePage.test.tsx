@@ -46,6 +46,7 @@ describe('MigratePage', () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(jsonResponse([project]))
       .mockResolvedValueOnce(jsonResponse(mockAnalysisResult))
+      .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(jsonResponse(edited));
     const user = userEvent.setup();
     renderRoute('/migrate/proj-1');

@@ -47,6 +47,23 @@ describe('api client', () => {
     expect(init?.body).toBeInstanceOf(FormData);
   });
 
+  it('uploads assets as form data without forcing json content type', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ asset_id: 'asset-1', analysis: { description: '产品特写' } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await api.analyzeAsset('proj-1', new File(['copy'], 'offer.txt', { type: 'text/plain' }));
+
+    const [url, init] = vi.mocked(fetch).mock.calls[0];
+    expect(url).toBe('http://127.0.0.1:8000/api/v1/assets/analyze/proj-1');
+    expect(init?.method).toBe('POST');
+    expect(init?.headers).toBeUndefined();
+    expect(init?.body).toBeInstanceOf(FormData);
+  });
+
   it('throws readable FastAPI errors', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(JSON.stringify({ detail: 'Project not found' }), {

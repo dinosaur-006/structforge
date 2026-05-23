@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import Column, Integer, MetaData, String, Table, Text, create_engine, select, text
+from sqlalchemy import Column, Float, Integer, MetaData, String, Table, Text, create_engine, select, text
 from sqlalchemy.engine import Engine
 
 from models.schemas import JobStatus, VideoStructure
@@ -42,6 +42,23 @@ projects = Table(
     Column("current_structure", Text, nullable=True),
     Column("undo_stack", Text, nullable=True),
     Column("redo_stack", Text, nullable=True),
+    Column("created_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+)
+
+
+assets = Table(
+    "assets",
+    metadata,
+    Column("id", String, primary_key=True),
+    Column("project_id", String, nullable=False),
+    Column("name", String, nullable=False),
+    Column("type", String, nullable=False),
+    Column("file_path", Text, nullable=True),
+    Column("tag", String, nullable=False),
+    Column("match_status", String, nullable=False),
+    Column("match_score", Float, nullable=False),
+    Column("analysis_json", Text, nullable=True),
     Column("created_at", String, nullable=False),
     Column("updated_at", String, nullable=False),
 )
@@ -88,6 +105,7 @@ class SQLiteRepository:
     def initialize(self) -> None:
         metadata.create_all(self.engine)
         self._migrate_projects_table()
+        self._migrate_assets_table()
 
     def _migrate_projects_table(self) -> None:
         required_columns = {
@@ -104,6 +122,33 @@ class SQLiteRepository:
                 if column_name not in existing_columns:
                     connection.execute(
                         text(f"ALTER TABLE projects ADD COLUMN {column_name} {column_definition}")
+                    )
+
+    def _migrate_assets_table(self) -> None:
+        required_columns = {
+            "id": "TEXT PRIMARY KEY",
+            "project_id": "TEXT NOT NULL",
+            "name": "TEXT NOT NULL DEFAULT ''",
+            "type": "TEXT NOT NULL DEFAULT 'image'",
+            "file_path": "TEXT",
+            "tag": "TEXT NOT NULL DEFAULT ''",
+            "match_status": "TEXT NOT NULL DEFAULT 'unmatched'",
+            "match_score": "REAL NOT NULL DEFAULT 0",
+            "analysis_json": "TEXT",
+            "created_at": "TEXT NOT NULL DEFAULT ''",
+            "updated_at": "TEXT NOT NULL DEFAULT ''",
+        }
+        with self.engine.begin() as connection:
+            existing_columns = {
+                row[1] for row in connection.execute(text("PRAGMA table_info(assets)"))
+            }
+            if not existing_columns:
+                metadata.create_all(connection)
+                return
+            for column_name, column_definition in required_columns.items():
+                if column_name not in existing_columns:
+                    connection.execute(
+                        text(f"ALTER TABLE assets ADD COLUMN {column_name} {column_definition}")
                     )
 
     def create_job(self, job_id: str, source_path: str, project_id: str | None = None) -> None:
@@ -293,8 +338,71 @@ class SQLiteRepository:
 
     def delete_project(self, project_id: str) -> bool:
         with self.engine.begin() as connection:
+            connection.execute(assets.delete().where(assets.c.project_id == project_id))
             result = connection.execute(projects.delete().where(projects.c.id == project_id))
         return result.rowcount > 0
+
+    def create_asset(
+        self,
+        *,
+        project_id: str,
+        name: str,
+        asset_type: str,
+        file_path: str | None,
+        tag: str,
+        analysis: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        asset_id = str(uuid4())
+        now = _utc_now()
+        analysis_json = json.dumps(analysis or {}, ensure_ascii=False)
+        with self.engine.begin() as connection:
+            connection.execute(
+                assets.insert().values(
+                    id=asset_id,
+                    project_id=project_id,
+                    name=name,
+                    type=asset_type,
+                    file_path=file_path,
+                    tag=tag,
+                    match_status="unmatched",
+                    match_score=0.0,
+                    analysis_json=analysis_json,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        asset = self.get_asset(asset_id)
+        if asset is None:
+            raise RuntimeError("Failed to create asset")
+        return asset
+
+    def list_assets(self, project_id: str) -> list[dict[str, Any]]:
+        with self.engine.begin() as connection:
+            rows = connection.execute(
+                select(assets).where(assets.c.project_id == project_id).order_by(assets.c.created_at.desc())
+            ).all()
+        return [self._asset_row_to_dict(row._mapping) for row in rows]
+
+    def get_asset(self, asset_id: str) -> dict[str, Any] | None:
+        with self.engine.begin() as connection:
+            row = connection.execute(select(assets).where(assets.c.id == asset_id)).first()
+        if row is None:
+            return None
+        return self._asset_row_to_dict(row._mapping)
+
+    def update_asset_match(self, asset_id: str, *, score: float, status: str) -> None:
+        with self.engine.begin() as connection:
+            connection.execute(
+                assets.update()
+                .where(assets.c.id == asset_id)
+                .values(match_score=score, match_status=status, updated_at=_utc_now())
+            )
+
+    def _asset_row_to_dict(self, row: Any) -> dict[str, Any]:
+        data = dict(row)
+        data["analysis"] = _load_json(data.get("analysis_json"), {})
+        data["match_score"] = float(data.get("match_score") or 0)
+        return data
 
     def save_project_structure_state(
         self,

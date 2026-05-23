@@ -2,14 +2,15 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Response
 
+from config import Settings
 from models.repository import SQLiteRepository
 from models.schemas import ProjectCreate, ProjectOut, ProjectUpdate
 from services.projects import ProjectNotFoundError, ProjectService
 
 
-def build_projects_router(repository: SQLiteRepository) -> APIRouter:
+def build_projects_router(repository: SQLiteRepository, settings: Settings | None = None) -> APIRouter:
     router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
-    service = ProjectService(repository)
+    service = ProjectService(repository, upload_dir=settings.upload_dir if settings else None)
 
     @router.post("", response_model=ProjectOut)
     async def create_project(payload: ProjectCreate) -> dict:

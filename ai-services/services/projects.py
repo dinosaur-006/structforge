@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import shutil
+from pathlib import Path
+
 from models.repository import SQLiteRepository
 
 
@@ -8,8 +11,9 @@ class ProjectNotFoundError(LookupError):
 
 
 class ProjectService:
-    def __init__(self, repository: SQLiteRepository) -> None:
+    def __init__(self, repository: SQLiteRepository, upload_dir: Path | None = None) -> None:
         self.repository = repository
+        self.upload_dir = upload_dir
 
     def create_project(self, *, name: str, description: str = "") -> dict:
         return self._to_project_out(self.repository.create_project(name=name, description=description))
@@ -42,6 +46,8 @@ class ProjectService:
     def delete_project(self, project_id: str) -> None:
         if not self.repository.delete_project(project_id):
             raise ProjectNotFoundError(f"Project not found: {project_id}")
+        if self.upload_dir is not None:
+            shutil.rmtree(self.upload_dir / project_id, ignore_errors=True)
 
     def _to_project_out(self, project: dict) -> dict:
         return {

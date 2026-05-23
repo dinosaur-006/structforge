@@ -23,6 +23,7 @@ export default function MigratePage() {
   const loadProjectStructure = useAppStore((state) => state.loadProjectStructure);
   const currentStructure = useAppStore((state) => state.currentStructure);
   const assets = useAppStore((state) => state.assets);
+  const assetLoading = useAppStore((state) => state.assetLoading);
   const gaps = useAppStore((state) => state.gaps);
   const selectedSegmentId = useAppStore((state) => state.selectedSegmentId);
   const drawerOpen = useAppStore((state) => state.drawerOpen);
@@ -37,6 +38,7 @@ export default function MigratePage() {
   const fixGaps = useAppStore((state) => state.fixGaps);
   const addToast = useAppStore((state) => state.addToast);
   const removeSelectedSegment = useAppStore((state) => state.removeSelectedSegment);
+  const uploadAsset = useAppStore((state) => state.uploadAsset);
 
   useEffect(() => {
     let cancelled = false;
@@ -119,7 +121,7 @@ export default function MigratePage() {
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[16rem,1fr]">
-        <AssetPanel assets={assets} />
+        <AssetPanel assets={assets} assetLoading={assetLoading} onUploadAsset={(file) => void uploadAsset(file)} />
         <TimelineEditor segments={currentStructure.script} gaps={gaps} onSelect={selectSegment} onReorder={(activeId, overId) => void reorderSegments(activeId, overId)} />
       </div>
       <GapPanel gaps={gaps} isFixing={isFixing} onFixAll={() => void fixGaps()} />

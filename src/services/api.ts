@@ -1,4 +1,4 @@
-import type { Project, ScriptSegment, VideoStructure } from '../shared/types';
+import type { Asset, MatchStatus, Project, ScriptSegment, VideoStructure } from '../shared/types';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://127.0.0.1:8000';
 
@@ -28,6 +28,15 @@ export interface StructureActionResponse {
   action: 'undo' | 'redo';
   available: boolean;
   structure: VideoStructure;
+}
+
+export interface AssetAnalyzeResponse {
+  asset_id: string;
+  analysis: Record<string, unknown>;
+}
+
+export interface AssetMatchResponse {
+  matches: Array<{ asset_id: string; segment_id: string; score: number; status: MatchStatus }>;
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -72,6 +81,13 @@ export const api = {
     return request<AnalysisJob>('/api/v1/analyze', { method: 'POST', body: form });
   },
   getAnalysis: (jobId: string) => request<AnalysisStatus>(`/api/v1/analyze/${jobId}`),
+  analyzeAsset: (projectId: string, file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return request<AssetAnalyzeResponse>(`/api/v1/assets/analyze/${projectId}`, { method: 'POST', body: form });
+  },
+  listAssets: (projectId: string) => request<Asset[]>(`/api/v1/assets/${projectId}`),
+  matchAssets: (projectId: string) => request<AssetMatchResponse>(`/api/v1/assets/${projectId}/match`),
   getStructure: (projectId: string) => request<VideoStructure>(`/api/v1/structure/${projectId}`),
   replaceStructure: (projectId: string, structure: VideoStructure) =>
     request<VideoStructure>(`/api/v1/structure/${projectId}`, { method: 'PUT', body: JSON.stringify(structure) }),

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -116,3 +116,33 @@ class StructureActionResponse(StrictModel):
     action: Literal["undo", "redo"]
     available: bool
     structure: VideoStructure
+
+
+AssetType = Literal["image", "video", "text"]
+MatchStatus = Literal["matched", "partial", "unmatched"]
+
+
+class AssetOut(StrictModel):
+    id: str
+    name: str
+    type: AssetType
+    tag: str
+    matchStatus: MatchStatus
+    matchScore: float = Field(ge=0, le=100)
+    color: str
+
+
+class AssetAnalyzeResponse(StrictModel):
+    asset_id: str
+    analysis: dict[str, Any]
+
+
+class AssetMatch(StrictModel):
+    asset_id: str
+    segment_id: str
+    score: float = Field(ge=0, le=100)
+    status: MatchStatus
+
+
+class AssetMatchResponse(StrictModel):
+    matches: list[AssetMatch]

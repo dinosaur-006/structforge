@@ -1,6 +1,6 @@
 export type ProjectStatus = 'draft' | 'analyzing' | 'editing' | 'rendering' | 'completed';
 export type SegmentType = 'hook' | 'pain' | 'product' | 'proof' | 'cta';
-export type AssetType = 'image' | 'video';
+export type AssetType = 'image' | 'video' | 'text';
 export type MatchStatus = 'matched' | 'partial' | 'unmatched';
 export type HealthTone = 'success' | 'warning' | 'error';
 export type GapSeverity = 'critical' | 'warning';
