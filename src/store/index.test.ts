@@ -39,6 +39,27 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
+const finalScript = {
+  version: 'high_click' as const,
+  total_duration: 35,
+  segments: [
+    {
+      id: 'seg-hook',
+      type: 'hook' as const,
+      start: 0,
+      end: 3,
+      duration: 3,
+      script: 'Generated hook',
+      visual: 'Product close-up',
+      asset_id: null,
+      subtitle_style: 'clean_caption',
+      transition: 'hard_cut',
+      locked: false,
+    },
+  ],
+  metadata: { warnings: [] as string[] },
+};
+
 describe('app store', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn());
@@ -129,6 +150,29 @@ describe('app store', () => {
     expect(useAppStore.getState().gaps).toEqual([]);
     expect(useAppStore.getState().assets).toEqual([textAsset]);
     expect(useAppStore.getState().currentStructure?.script[0].assetId).toBe('asset-fill');
+  });
+
+  it('generates and loads final scripts through the API', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(jsonResponse(finalScript))
+      .mockResolvedValueOnce(jsonResponse({ ...finalScript, version: 'high_quality' }));
+
+    const generated = await useAppStore.getState().migrateScript('proj-1', 'high_click');
+    await useAppStore.getState().loadFinalScript('proj-1');
+
+    expect(generated?.version).toBe('high_click');
+    expect(useAppStore.getState().currentScript?.version).toBe('high_quality');
+    expect(useAppStore.getState().scriptLoading).toBe(false);
+  });
+
+  it('reports script generation errors and clears loading state', async () => {
+    vi.mocked(fetch).mockRejectedValueOnce(new Error('请补充商品信息'));
+
+    const generated = await useAppStore.getState().migrateScript('proj-1', 'high_click');
+
+    expect(generated).toBeUndefined();
+    expect(useAppStore.getState().scriptLoading).toBe(false);
+    expect(useAppStore.getState().toasts.at(-1)).toMatchObject({ tone: 'error' });
   });
 
   it('reports asset upload errors and clears loading state', async () => {

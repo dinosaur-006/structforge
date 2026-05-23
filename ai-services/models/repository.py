@@ -9,7 +9,7 @@ from uuid import uuid4
 from sqlalchemy import Column, Float, Integer, MetaData, String, Table, Text, create_engine, select, text
 from sqlalchemy.engine import Engine
 
-from models.schemas import JobStatus, VideoStructure
+from models.schemas import FinalScript, JobStatus, VideoStructure
 
 
 metadata = MetaData()
@@ -42,6 +42,7 @@ projects = Table(
     Column("current_structure", Text, nullable=True),
     Column("undo_stack", Text, nullable=True),
     Column("redo_stack", Text, nullable=True),
+    Column("script_json", Text, nullable=True),
     Column("created_at", String, nullable=False),
     Column("updated_at", String, nullable=False),
 )
@@ -90,6 +91,13 @@ def _dump_stack(stack: list[VideoStructure | dict[str, Any]] | None) -> str:
     return json.dumps(payload, ensure_ascii=False)
 
 
+def _dump_script(script: FinalScript | dict[str, Any] | None) -> str | None:
+    if script is None:
+        return None
+    payload = FinalScript.model_validate(script).model_dump(mode="json", by_alias=True)
+    return json.dumps(payload, ensure_ascii=False)
+
+
 def _load_json(value: str | None, fallback: Any) -> Any:
     if not value:
         return fallback
@@ -113,6 +121,7 @@ class SQLiteRepository:
             "current_structure": "TEXT",
             "undo_stack": "TEXT",
             "redo_stack": "TEXT",
+            "script_json": "TEXT",
         }
         with self.engine.begin() as connection:
             existing_columns = {
@@ -279,13 +288,14 @@ class SQLiteRepository:
                         name=name or project_id,
                         description=description or "",
                         status=status,
-                        analysis_result_json=result_json,
-                        current_structure=None if current_json is _UNSET else current_json,
-                        undo_stack="[]" if undo_json is _UNSET else undo_json,
-                        redo_stack="[]" if redo_json is _UNSET else redo_json,
-                        created_at=now,
-                        updated_at=now,
-                    )
+                    analysis_result_json=result_json,
+                    current_structure=None if current_json is _UNSET else current_json,
+                    undo_stack="[]" if undo_json is _UNSET else undo_json,
+                    redo_stack="[]" if redo_json is _UNSET else redo_json,
+                    script_json=None,
+                    created_at=now,
+                    updated_at=now,
+                )
                 )
 
     def create_project(self, name: str, description: str = "") -> dict[str, Any]:
@@ -302,6 +312,7 @@ class SQLiteRepository:
                     current_structure=None,
                     undo_stack="[]",
                     redo_stack="[]",
+                    script_json=None,
                     created_at=now,
                     updated_at=now,
                 )
@@ -341,6 +352,23 @@ class SQLiteRepository:
             connection.execute(assets.delete().where(assets.c.project_id == project_id))
             result = connection.execute(projects.delete().where(projects.c.id == project_id))
         return result.rowcount > 0
+
+    def save_project_script(self, project_id: str, script: FinalScript | dict[str, Any]) -> dict[str, Any] | None:
+        with self.engine.begin() as connection:
+            result = connection.execute(
+                projects.update()
+                .where(projects.c.id == project_id)
+                .values(script_json=_dump_script(script), updated_at=_utc_now())
+            )
+        if result.rowcount == 0:
+            return None
+        return self.get_project(project_id)
+
+    def get_project_script(self, project_id: str) -> dict[str, Any] | None:
+        project = self.get_project(project_id)
+        if project is None:
+            return None
+        return project.get("script")
 
     def create_asset(
         self,
@@ -461,4 +489,5 @@ class SQLiteRepository:
         data["current_structure"] = _load_json(data.get("current_structure"), None)
         data["undo_stack"] = _load_json(data.get("undo_stack"), [])
         data["redo_stack"] = _load_json(data.get("redo_stack"), [])
+        data["script"] = _load_json(data.get("script_json"), None)
         return data

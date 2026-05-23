@@ -6,6 +6,7 @@ export type HealthTone = 'success' | 'warning' | 'error';
 export type GapSeverity = 'critical' | 'warning';
 export type GapStatus = 'open' | 'fixed';
 export type SourceType = 'original' | 'reorder' | 'aigc' | 'packaging';
+export type FinalScriptStyle = 'high_click' | 'high_conversion' | 'fast_pace' | 'high_quality' | 'default';
 
 export interface Project {
   id: string;
@@ -105,6 +106,31 @@ export interface ResultTimelineSegment {
   start: number;
   end: number;
   source: SourceType;
+}
+
+export interface FinalSegment {
+  id: string;
+  type: SegmentType;
+  start: number;
+  end: number;
+  duration: number;
+  script: string;
+  visual: string;
+  asset_id: string | null;
+  subtitle_style: string;
+  transition: string;
+  locked: boolean;
+}
+
+export interface FinalScript {
+  version: FinalScriptStyle;
+  total_duration: number;
+  segments: FinalSegment[];
+  metadata: {
+    warnings?: string[];
+    generated_at?: string;
+    [key: string]: unknown;
+  };
 }
 
 export interface ResultVersion {

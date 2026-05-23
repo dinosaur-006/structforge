@@ -194,3 +194,35 @@ class GapFixAllResponse(StrictModel):
     gaps: list[MaterialGapOut]
     updated_structure: VideoStructure | None = None
     assets: list[AssetOut] = Field(default_factory=list)
+
+
+FinalScriptStyle = Literal["high_click", "high_conversion", "fast_pace", "high_quality", "default"]
+
+
+class FinalSegment(StrictModel):
+    id: str
+    type: SegmentType
+    start: float = Field(ge=0)
+    end: float = Field(ge=0)
+    duration: float = Field(ge=0)
+    script: str
+    visual: str
+    asset_id: str | None = None
+    subtitle_style: str
+    transition: str
+    locked: bool = False
+
+
+class FinalScript(StrictModel):
+    version: FinalScriptStyle
+    total_duration: float = Field(ge=0)
+    segments: list[FinalSegment] = Field(min_length=1)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class MigrateRequest(StrictModel):
+    style: FinalScriptStyle = "default"
+
+
+class MigrateVariantRequest(StrictModel):
+    style: Literal["high_click", "high_conversion", "fast_pace", "high_quality"]

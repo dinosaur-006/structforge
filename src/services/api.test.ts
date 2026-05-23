@@ -86,6 +86,30 @@ describe('api client', () => {
     expect(fetch).toHaveBeenNthCalledWith(2, 'http://127.0.0.1:8000/api/v1/gaps/proj-1/fix-all', { method: 'POST' });
   });
 
+  it('calls migrate script endpoints with json bodies', async () => {
+    const script = { version: 'high_click', total_duration: 35, segments: [], metadata: { warnings: [] } };
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify(script), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...script, version: 'high_quality' }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(script), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+    await api.migrateScript('proj-1', 'high_click');
+    await api.migrateVariant('proj-1', 'high_quality');
+    await api.getFinalScript('proj-1');
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      'http://127.0.0.1:8000/api/v1/migrate/proj-1',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ style: 'high_click' }) }),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      'http://127.0.0.1:8000/api/v1/migrate/proj-1/variant',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ style: 'high_quality' }) }),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(3, 'http://127.0.0.1:8000/api/v1/migrate/proj-1', {});
+  });
+
   it('throws readable FastAPI errors', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(JSON.stringify({ detail: 'Project not found' }), {

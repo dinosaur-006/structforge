@@ -11,7 +11,16 @@ import { ErrorAlert } from '../components/ui/ErrorAlert';
 import { MetricRow } from '../components/ui/MetricRow';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { copy } from '../shared/copy';
+import type { FinalScript, ResultTimelineSegment } from '../shared/types';
 import { useAppStore } from '../store';
+
+const scriptVersionLabel: Record<string, string> = {
+  high_click: '\u9ad8\u70b9\u51fb\u7248',
+  high_conversion: '\u9ad8\u8f6c\u5316\u7248',
+  fast_pace: '\u5feb\u8282\u594f\u7248',
+  high_quality: '\u9ad8\u8d28\u611f\u7248',
+  default: '\u9ed8\u8ba4\u7248',
+};
 
 export default function ResultPage() {
   const { projectId = '' } = useParams();
@@ -19,8 +28,10 @@ export default function ResultPage() {
   const [exportOpen, setExportOpen] = useState(false);
   const [projectsChecked, setProjectsChecked] = useState(false);
   const fetchProjects = useAppStore((state) => state.fetchProjects);
+  const loadFinalScript = useAppStore((state) => state.loadFinalScript);
   const findProject = useAppStore((state) => state.findProject);
   const project = findProject(projectId);
+  const currentScript = useAppStore((state) => state.currentScript);
   const versions = useAppStore((state) => state.versions);
   const currentVersionId = useAppStore((state) => state.currentVersionId);
   const setVersion = useAppStore((state) => state.setVersion);
@@ -28,18 +39,24 @@ export default function ResultPage() {
   const exportResult = useAppStore((state) => state.exportResult);
   const currentVersion = useMemo(() => versions.find((version) => version.id === currentVersionId) ?? versions[0], [currentVersionId, versions]);
   const original = versions[0];
+  const scriptTimeline = useMemo(() => (currentScript ? timelineFromScript(currentScript) : null), [currentScript]);
+  const activeTimeline = scriptTimeline ?? currentVersion.timeline;
+  const description = currentScript
+    ? `${project?.name ?? projectId} ${'\u00b7'} ${scriptVersionLabel[currentScript.version] ?? currentScript.version}`
+    : `${project?.name ?? projectId} ${'\u00b7'} ${currentVersion.name}`;
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
       if (!useAppStore.getState().projects.length) await fetchProjects();
+      await loadFinalScript(projectId);
       if (!cancelled) setProjectsChecked(true);
     }
     void load();
     return () => {
       cancelled = true;
     };
-  }, [fetchProjects]);
+  }, [fetchProjects, loadFinalScript, projectId]);
 
   if (!project && !projectsChecked) return null;
 
@@ -51,7 +68,7 @@ export default function ResultPage() {
     <section className="mx-auto max-w-[1240px] space-y-6">
       <SectionHeader
         title={copy.resultTitle}
-        description={`${project.name} ${'\u00b7'} ${currentVersion.name}`}
+        description={description}
         action={
           <div className="flex flex-wrap gap-3">
             <Button variant="secondary" onClick={() => setExportOpen(true)}><Download className="h-4 w-4" />{copy.exportReport}</Button>
@@ -61,8 +78,13 @@ export default function ResultPage() {
       />
 
       <VersionTabs versions={versions} currentId={currentVersion.id} onChange={setVersion} />
+      {!currentScript ? (
+        <div className="rounded-lg border border-border bg-card p-4 text-sm text-text-secondary shadow-sm">
+          {'\u5c1a\u672a\u751f\u6210\u6700\u7ec8\u811a\u672c\uff0c\u5f53\u524d\u663e\u793a\u6f14\u793a\u7248\u672c\u6570\u636e\u3002'}
+        </div>
+      ) : null}
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr),340px]">
-        <VideoPlayer timeline={currentVersion.timeline} />
+        <VideoPlayer timeline={activeTimeline} />
         <aside className="rounded-lg border border-border bg-card p-5 shadow-sm">
           <h2 className="font-semibold">{'\u7248\u672c\u6307\u6807'}</h2>
           <div className="mt-3">
@@ -74,9 +96,19 @@ export default function ResultPage() {
           </div>
         </aside>
       </div>
-      <ResultTimeline segments={currentVersion.timeline} onSeek={() => undefined} />
+      <ResultTimeline segments={activeTimeline} onSeek={() => undefined} />
       <CompareRadar original={original.health} current={currentVersion.health} />
       <ExportDialog open={exportOpen} isExporting={isExporting} onClose={() => setExportOpen(false)} onExport={() => void exportResult()} />
     </section>
   );
+}
+
+function timelineFromScript(script: FinalScript): ResultTimelineSegment[] {
+  return script.segments.map((segment) => ({
+    id: segment.id,
+    label: segment.script,
+    start: segment.start,
+    end: segment.end,
+    source: segment.asset_id ? 'original' : 'packaging',
+  }));
 }

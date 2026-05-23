@@ -9,7 +9,14 @@ import { Button } from '../components/ui/Button';
 import { ErrorAlert } from '../components/ui/ErrorAlert';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { copy } from '../shared/copy';
+import type { FinalScriptStyle } from '../shared/types';
 import { useAppStore } from '../store';
+
+const styleMap: Record<string, FinalScriptStyle> = {
+  fast: 'fast_pace',
+  conversion: 'high_conversion',
+  premium: 'high_quality',
+};
 
 export default function MigratePage() {
   const { projectId = '' } = useParams();
@@ -40,6 +47,8 @@ export default function MigratePage() {
   const addToast = useAppStore((state) => state.addToast);
   const removeSelectedSegment = useAppStore((state) => state.removeSelectedSegment);
   const uploadAsset = useAppStore((state) => state.uploadAsset);
+  const migrateScript = useAppStore((state) => state.migrateScript);
+  const scriptLoading = useAppStore((state) => state.scriptLoading);
 
   useEffect(() => {
     let cancelled = false;
@@ -82,6 +91,11 @@ export default function MigratePage() {
     [currentStructure, selectedSegmentId],
   );
 
+  const handleGenerate = async () => {
+    const script = await migrateScript(projectId, styleMap[style] ?? 'default');
+    if (script) navigate(`/result/${projectId}`);
+  };
+
   if (!currentStructure && !structureChecked && routeLoading) return null;
 
   if (!currentStructure && structureChecked) {
@@ -98,7 +112,7 @@ export default function MigratePage() {
         action={
           <div className="flex flex-wrap gap-3">
             <Button variant="secondary" onClick={() => navigate(`/result/${projectId}`)}>{copy.previewResult}</Button>
-            <Button variant="primary" onClick={() => navigate(`/result/${projectId}`)}>{copy.generateVideo}</Button>
+            <Button variant="primary" disabled={scriptLoading} onClick={() => void handleGenerate()}>{scriptLoading ? '\u751f\u6210\u4e2d...' : copy.generateVideo}</Button>
           </div>
         }
       />

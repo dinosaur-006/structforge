@@ -8,6 +8,7 @@ from models.repository import SQLiteRepository
 from models.schemas import AnalyzeResponse, TaskProgress
 from routes.assets import build_assets_router
 from routes.gaps import build_gaps_router
+from routes.migrate import build_migrate_router
 from routes.projects import build_projects_router
 from routes.structure import build_structure_router
 from services.uploads import (
@@ -39,6 +40,7 @@ def create_app() -> FastAPI:
     app.include_router(build_structure_router(repository))
     app.include_router(build_assets_router(repository, settings))
     app.include_router(build_gaps_router(repository, settings))
+    app.include_router(build_migrate_router(repository, settings=settings))
 
     @app.get("/")
     @app.get("/health")

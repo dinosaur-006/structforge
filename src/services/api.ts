@@ -1,4 +1,4 @@
-import type { Asset, MaterialGap, MatchStatus, Project, ScriptSegment, VideoStructure } from '../shared/types';
+import type { Asset, FinalScript, FinalScriptStyle, MaterialGap, MatchStatus, Project, ScriptSegment, VideoStructure } from '../shared/types';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://127.0.0.1:8000';
 
@@ -112,6 +112,11 @@ export const api = {
   fixGap: (projectId: string, gapId: string, strategy: string) =>
     request<GapFixResponse>(`/api/v1/gaps/${projectId}/fix`, { method: 'POST', body: JSON.stringify({ gap_id: gapId, strategy }) }),
   fixAllGaps: (projectId: string) => request<GapFixAllResponse>(`/api/v1/gaps/${projectId}/fix-all`, { method: 'POST' }),
+  migrateScript: (projectId: string, style: FinalScriptStyle = 'default') =>
+    request<FinalScript>(`/api/v1/migrate/${projectId}`, { method: 'POST', body: JSON.stringify({ style }) }),
+  migrateVariant: (projectId: string, style: Exclude<FinalScriptStyle, 'default'>) =>
+    request<FinalScript>(`/api/v1/migrate/${projectId}/variant`, { method: 'POST', body: JSON.stringify({ style }) }),
+  getFinalScript: (projectId: string) => request<FinalScript>(`/api/v1/migrate/${projectId}`),
   getStructure: (projectId: string) => request<VideoStructure>(`/api/v1/structure/${projectId}`),
   replaceStructure: (projectId: string, structure: VideoStructure) =>
     request<VideoStructure>(`/api/v1/structure/${projectId}`, { method: 'PUT', body: JSON.stringify(structure) }),

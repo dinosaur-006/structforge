@@ -1,10 +1,10 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { api } from '../services/api';
+import { api, ApiError } from '../services/api';
 import { mockAnalysisResult } from '../mocks/analysisResult';
 import { mockVersions } from '../mocks/versions';
 import { uid } from '../shared/format';
-import type { Asset, MaterialGap, Project, ResultVersion, ScriptSegment, ToastMessage, VideoStructure } from '../shared/types';
+import type { Asset, FinalScript, FinalScriptStyle, MaterialGap, Project, ResultVersion, ScriptSegment, ToastMessage, VideoStructure } from '../shared/types';
 
 const analysisStages = [
   '\u6b63\u5728\u62bd\u5e27...',
@@ -42,6 +42,8 @@ function initialState() {
     future: [] as VideoStructure[],
     versions: [...mockVersions],
     currentVersionId: 'original',
+    currentScript: null,
+    scriptLoading: false,
     isExporting: false,
     toasts: [] as ToastMessage[],
   };
@@ -71,6 +73,8 @@ interface AppState {
   future: VideoStructure[];
   versions: ResultVersion[];
   currentVersionId: string;
+  currentScript: FinalScript | null;
+  scriptLoading: boolean;
   isExporting: boolean;
   toasts: ToastMessage[];
   toggleSidebar: () => void;
@@ -99,6 +103,8 @@ interface AppState {
   redo: () => Promise<void>;
   resetStructure: () => Promise<void>;
   fixGaps: () => Promise<void>;
+  migrateScript: (projectId: string, style?: FinalScriptStyle) => Promise<FinalScript | undefined>;
+  loadFinalScript: (projectId: string) => Promise<void>;
   setVersion: (id: string) => void;
   exportResult: () => Promise<void>;
   addToast: (toast: Omit<ToastMessage, 'id'>) => void;
@@ -407,6 +413,39 @@ export const useAppStore = create<AppState>()(
         }
       },
       fixGaps: () => get().fixAllGaps(),
+      migrateScript: async (projectId, style = 'default') => {
+        set({ scriptLoading: true, apiError: null, activeProjectId: projectId });
+        try {
+          const script = await api.migrateScript(projectId, style);
+          set({ currentScript: script });
+          get().addToast({ tone: 'success', title: '\u811a\u672c\u751f\u6210\u5b8c\u6210' });
+          return script;
+        } catch (error) {
+          const message = getErrorMessage(error);
+          set({ apiError: message });
+          get().addToast({ tone: 'error', title: '\u811a\u672c\u751f\u6210\u5931\u8d25', description: message });
+          return undefined;
+        } finally {
+          set({ scriptLoading: false });
+        }
+      },
+      loadFinalScript: async (projectId) => {
+        set({ scriptLoading: true, apiError: null, activeProjectId: projectId });
+        try {
+          const script = await api.getFinalScript(projectId);
+          set({ currentScript: script });
+        } catch (error) {
+          if (error instanceof ApiError && error.status === 404) {
+            set({ currentScript: null });
+            return;
+          }
+          const message = getErrorMessage(error);
+          set({ apiError: message, currentScript: null });
+          get().addToast({ tone: 'error', title: '\u811a\u672c\u52a0\u8f7d\u5931\u8d25', description: message });
+        } finally {
+          set({ scriptLoading: false });
+        }
+      },
       setVersion: (id) => set({ currentVersionId: id }),
       exportResult: () =>
         new Promise((resolve) => {
