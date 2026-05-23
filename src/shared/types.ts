@@ -7,6 +7,9 @@ export type GapSeverity = 'critical' | 'warning';
 export type GapStatus = 'open' | 'fixed';
 export type SourceType = 'original' | 'reorder' | 'aigc' | 'packaging';
 export type FinalScriptStyle = 'high_click' | 'high_conversion' | 'fast_pace' | 'high_quality' | 'default';
+export type RenderVersion = 'original' | 'safe_fix' | 'strong_hook' | 'strong_conversion';
+export type RenderStatus = 'idle' | 'pending' | 'processing' | 'completed' | 'failed';
+export type RenderResolution = '720p' | '1080p';
 
 export interface Project {
   id: string;

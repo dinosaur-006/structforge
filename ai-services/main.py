@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from config import Settings
 from models.repository import SQLiteRepository
@@ -10,6 +11,7 @@ from routes.assets import build_assets_router
 from routes.gaps import build_gaps_router
 from routes.migrate import build_migrate_router
 from routes.projects import build_projects_router
+from routes.render import build_render_router
 from routes.structure import build_structure_router
 from services.uploads import (
     UploadValidationError,
@@ -41,6 +43,9 @@ def create_app() -> FastAPI:
     app.include_router(build_assets_router(repository, settings))
     app.include_router(build_gaps_router(repository, settings))
     app.include_router(build_migrate_router(repository, settings=settings))
+    app.include_router(build_render_router(repository, settings))
+    settings.output_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/outputs", StaticFiles(directory=settings.output_dir), name="outputs")
 
     @app.get("/")
     @app.get("/health")

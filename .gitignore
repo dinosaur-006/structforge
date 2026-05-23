@@ -37,8 +37,10 @@ venv/
 data/*.db
 data/uploads/*
 data/outputs/*
+data/demo-cases/*
 !data/uploads/.gitkeep
 !data/outputs/.gitkeep
+!data/demo-cases/.gitkeep
 
 # Local verification artifacts
 ai-services/test_video.mp4

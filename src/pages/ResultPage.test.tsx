@@ -84,4 +84,40 @@ describe('ResultPage', () => {
 
     expect(await screen.findByText('Generated hook')).toBeInTheDocument();
   });
+
+  it('starts a render job from the export dialog and passes the output to the player', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([project]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(finalScript), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ job_id: 'render-1' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: 'completed', progress: 100, output_url: '/outputs/proj-1/original.mp4', warnings: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    const user = userEvent.setup();
+
+    renderRoute('/result/proj-1');
+    await user.click(await screen.findByRole('button', { name: /\u5bfc\u51fa\u89c6\u9891/ }));
+    await user.click(screen.getByRole('button', { name: /\u5f00\u59cb\u5bfc\u51fa/ }));
+
+    expect(await screen.findByTestId('rendered-video')).toHaveAttribute('src', 'http://127.0.0.1:8000/outputs/proj-1/original.mp4');
+    expect(screen.getByRole('link', { name: /\u4e0b\u8f7d\u89c6\u9891/ })).toHaveAttribute('href', 'http://127.0.0.1:8000/outputs/proj-1/original.mp4');
+  });
 });

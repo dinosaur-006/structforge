@@ -226,3 +226,25 @@ class MigrateRequest(StrictModel):
 
 class MigrateVariantRequest(StrictModel):
     style: Literal["high_click", "high_conversion", "fast_pace", "high_quality"]
+
+
+RenderVersion = Literal["original", "safe_fix", "strong_hook", "strong_conversion"]
+RenderStatus = Literal["pending", "processing", "completed", "failed"]
+RenderResolution = Literal["720p", "1080p"]
+
+
+class RenderRequest(StrictModel):
+    version: RenderVersion
+    resolution: RenderResolution = "1080p"
+
+
+class RenderJobResponse(StrictModel):
+    job_id: str
+
+
+class RenderProgress(StrictModel):
+    status: RenderStatus
+    progress: float = Field(ge=0, le=100)
+    output_url: str | None = None
+    error: str | None = None
+    warnings: list[str] = Field(default_factory=list)

@@ -65,6 +65,22 @@ assets = Table(
 )
 
 
+render_jobs = Table(
+    "render_jobs",
+    metadata,
+    Column("id", String, primary_key=True),
+    Column("project_id", String, nullable=False),
+    Column("version", String, nullable=False),
+    Column("status", String, nullable=False),
+    Column("progress", Float, nullable=False),
+    Column("output_path", Text, nullable=True),
+    Column("error", Text, nullable=True),
+    Column("warnings_json", Text, nullable=True),
+    Column("created_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+)
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -112,8 +128,11 @@ class SQLiteRepository:
 
     def initialize(self) -> None:
         metadata.create_all(self.engine)
+        with self.engine.begin() as connection:
+            connection.execute(text("PRAGMA journal_mode=WAL"))
         self._migrate_projects_table()
         self._migrate_assets_table()
+        self._migrate_render_jobs_table()
 
     def _migrate_projects_table(self) -> None:
         required_columns = {
@@ -158,6 +177,32 @@ class SQLiteRepository:
                 if column_name not in existing_columns:
                     connection.execute(
                         text(f"ALTER TABLE assets ADD COLUMN {column_name} {column_definition}")
+                    )
+
+    def _migrate_render_jobs_table(self) -> None:
+        required_columns = {
+            "id": "TEXT PRIMARY KEY",
+            "project_id": "TEXT NOT NULL",
+            "version": "TEXT NOT NULL",
+            "status": "TEXT NOT NULL DEFAULT 'pending'",
+            "progress": "REAL NOT NULL DEFAULT 0",
+            "output_path": "TEXT",
+            "error": "TEXT",
+            "warnings_json": "TEXT",
+            "created_at": "TEXT NOT NULL DEFAULT ''",
+            "updated_at": "TEXT NOT NULL DEFAULT ''",
+        }
+        with self.engine.begin() as connection:
+            existing_columns = {
+                row[1] for row in connection.execute(text("PRAGMA table_info(render_jobs)"))
+            }
+            if not existing_columns:
+                metadata.create_all(connection)
+                return
+            for column_name, column_definition in required_columns.items():
+                if column_name not in existing_columns:
+                    connection.execute(
+                        text(f"ALTER TABLE render_jobs ADD COLUMN {column_name} {column_definition}")
                     )
 
     def create_job(self, job_id: str, source_path: str, project_id: str | None = None) -> None:
@@ -350,8 +395,66 @@ class SQLiteRepository:
     def delete_project(self, project_id: str) -> bool:
         with self.engine.begin() as connection:
             connection.execute(assets.delete().where(assets.c.project_id == project_id))
+            connection.execute(render_jobs.delete().where(render_jobs.c.project_id == project_id))
             result = connection.execute(projects.delete().where(projects.c.id == project_id))
         return result.rowcount > 0
+
+    def create_render_job(self, *, project_id: str, version: str) -> dict[str, Any]:
+        job_id = str(uuid4())
+        now = _utc_now()
+        with self.engine.begin() as connection:
+            connection.execute(
+                render_jobs.insert().values(
+                    id=job_id,
+                    project_id=project_id,
+                    version=version,
+                    status="pending",
+                    progress=0.0,
+                    output_path=None,
+                    error=None,
+                    warnings_json="[]",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        job = self.get_render_job(job_id)
+        if job is None:
+            raise RuntimeError("Failed to create render job")
+        return job
+
+    def update_render_job(
+        self,
+        job_id: str,
+        *,
+        status: str | None = None,
+        progress: float | None = None,
+        output_path: str | None = None,
+        error: str | None = None,
+        warnings: list[str] | None = None,
+    ) -> None:
+        values: dict[str, Any] = {"updated_at": _utc_now()}
+        if status is not None:
+            values["status"] = status
+        if progress is not None:
+            values["progress"] = max(0.0, min(float(progress), 100.0))
+        if output_path is not None:
+            values["output_path"] = output_path
+        if error is not None:
+            values["error"] = error
+        if warnings is not None:
+            values["warnings_json"] = json.dumps(warnings, ensure_ascii=False)
+        with self.engine.begin() as connection:
+            connection.execute(render_jobs.update().where(render_jobs.c.id == job_id).values(**values))
+
+    def get_render_job(self, job_id: str) -> dict[str, Any] | None:
+        with self.engine.begin() as connection:
+            row = connection.execute(select(render_jobs).where(render_jobs.c.id == job_id)).first()
+        if row is None:
+            return None
+        data = dict(row._mapping)
+        data["warnings"] = _load_json(data.get("warnings_json"), [])
+        data["progress"] = float(data.get("progress") or 0)
+        return data
 
     def save_project_script(self, project_id: str, script: FinalScript | dict[str, Any]) -> dict[str, Any] | None:
         with self.engine.begin() as connection:

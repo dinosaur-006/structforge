@@ -11,7 +11,7 @@ import { ErrorAlert } from '../components/ui/ErrorAlert';
 import { MetricRow } from '../components/ui/MetricRow';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { copy } from '../shared/copy';
-import type { FinalScript, ResultTimelineSegment } from '../shared/types';
+import type { FinalScript, RenderResolution, RenderVersion, ResultTimelineSegment } from '../shared/types';
 import { useAppStore } from '../store';
 
 const scriptVersionLabel: Record<string, string> = {
@@ -21,6 +21,15 @@ const scriptVersionLabel: Record<string, string> = {
   high_quality: '\u9ad8\u8d28\u611f\u7248',
   default: '\u9ed8\u8ba4\u7248',
 };
+
+const renderVersionMap: Record<string, RenderVersion> = {
+  original: 'original',
+  'safe-fix': 'safe_fix',
+  'strong-hook': 'strong_hook',
+  'strong-conversion': 'strong_conversion',
+};
+
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://127.0.0.1:8000';
 
 export default function ResultPage() {
   const { projectId = '' } = useParams();
@@ -36,7 +45,9 @@ export default function ResultPage() {
   const currentVersionId = useAppStore((state) => state.currentVersionId);
   const setVersion = useAppStore((state) => state.setVersion);
   const isExporting = useAppStore((state) => state.isExporting);
-  const exportResult = useAppStore((state) => state.exportResult);
+  const renderProgress = useAppStore((state) => state.renderProgress);
+  const outputUrl = useAppStore((state) => state.outputUrl);
+  const startRender = useAppStore((state) => state.startRender);
   const currentVersion = useMemo(() => versions.find((version) => version.id === currentVersionId) ?? versions[0], [currentVersionId, versions]);
   const original = versions[0];
   const scriptTimeline = useMemo(() => (currentScript ? timelineFromScript(currentScript) : null), [currentScript]);
@@ -44,6 +55,8 @@ export default function ResultPage() {
   const description = currentScript
     ? `${project?.name ?? projectId} ${'\u00b7'} ${scriptVersionLabel[currentScript.version] ?? currentScript.version}`
     : `${project?.name ?? projectId} ${'\u00b7'} ${currentVersion.name}`;
+  const renderedVideoUrl = outputUrl ? absoluteUrl(outputUrl) : null;
+  const defaultRenderVersion = renderVersionMap[currentVersion.id] ?? 'original';
 
   useEffect(() => {
     let cancelled = false;
@@ -84,7 +97,7 @@ export default function ResultPage() {
         </div>
       ) : null}
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr),340px]">
-        <VideoPlayer timeline={activeTimeline} />
+        <VideoPlayer timeline={activeTimeline} src={renderedVideoUrl} />
         <aside className="rounded-lg border border-border bg-card p-5 shadow-sm">
           <h2 className="font-semibold">{'\u7248\u672c\u6307\u6807'}</h2>
           <div className="mt-3">
@@ -98,7 +111,15 @@ export default function ResultPage() {
       </div>
       <ResultTimeline segments={activeTimeline} onSeek={() => undefined} />
       <CompareRadar original={original.health} current={currentVersion.health} />
-      <ExportDialog open={exportOpen} isExporting={isExporting} onClose={() => setExportOpen(false)} onExport={() => void exportResult()} />
+      <ExportDialog
+        open={exportOpen}
+        isExporting={isExporting}
+        progress={renderProgress}
+        outputUrl={renderedVideoUrl}
+        defaultVersion={defaultRenderVersion}
+        onClose={() => setExportOpen(false)}
+        onExport={(version: RenderVersion, resolution: RenderResolution) => void startRender(projectId, version, resolution)}
+      />
     </section>
   );
 }
@@ -111,4 +132,9 @@ function timelineFromScript(script: FinalScript): ResultTimelineSegment[] {
     end: segment.end,
     source: segment.asset_id ? 'original' : 'packaging',
   }));
+}
+
+function absoluteUrl(path: string): string {
+  if (/^https?:\/\//.test(path)) return path;
+  return `${API_BASE_URL}${path}`;
 }

@@ -110,6 +110,32 @@ describe('api client', () => {
     expect(fetch).toHaveBeenNthCalledWith(3, 'http://127.0.0.1:8000/api/v1/migrate/proj-1', {});
   });
 
+  it('calls render endpoints with version and resolution', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ job_id: 'render-1' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: 'completed', progress: 100, output_url: '/outputs/proj-1/strong_hook.mp4', warnings: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+    await api.startRender('proj-1', 'strong_hook', '1080p');
+    await api.getRenderJob('render-1');
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      'http://127.0.0.1:8000/api/v1/render/proj-1',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ version: 'strong_hook', resolution: '1080p' }) }),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(2, 'http://127.0.0.1:8000/api/v1/render/render-1', {});
+  });
+
   it('throws readable FastAPI errors', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(JSON.stringify({ detail: 'Project not found' }), {

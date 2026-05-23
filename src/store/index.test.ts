@@ -60,6 +60,13 @@ const finalScript = {
   metadata: { warnings: [] as string[] },
 };
 
+const completedRender = {
+  status: 'completed' as const,
+  progress: 100,
+  output_url: '/outputs/proj-1/strong_hook.mp4',
+  warnings: [] as string[],
+};
+
 describe('app store', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn());
@@ -172,6 +179,36 @@ describe('app store', () => {
 
     expect(generated).toBeUndefined();
     expect(useAppStore.getState().scriptLoading).toBe(false);
+    expect(useAppStore.getState().toasts.at(-1)).toMatchObject({ tone: 'error' });
+  });
+
+  it('starts render jobs and stores completed output url', async () => {
+    vi.useFakeTimers();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(jsonResponse({ job_id: 'render-1' }))
+      .mockResolvedValueOnce(jsonResponse({ status: 'processing', progress: 45, warnings: [] }))
+      .mockResolvedValueOnce(jsonResponse(completedRender));
+
+    const promise = useAppStore.getState().startRender('proj-1', 'strong_hook', '1080p');
+    await vi.advanceTimersByTimeAsync(1100);
+    await promise;
+
+    expect(useAppStore.getState().renderJobId).toBe('render-1');
+    expect(useAppStore.getState().renderStatus).toBe('completed');
+    expect(useAppStore.getState().renderProgress).toBe(100);
+    expect(useAppStore.getState().outputUrl).toBe('/outputs/proj-1/strong_hook.mp4');
+  });
+
+  it('reports render failures and clears exporting state', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(jsonResponse({ job_id: 'render-1' }))
+      .mockResolvedValueOnce(jsonResponse({ status: 'failed', progress: 100, error: 'ffmpeg failed', warnings: [] }));
+
+    await useAppStore.getState().startRender('proj-1', 'original', '720p');
+
+    expect(useAppStore.getState().renderStatus).toBe('failed');
+    expect(useAppStore.getState().renderError).toBe('ffmpeg failed');
+    expect(useAppStore.getState().isExporting).toBe(false);
     expect(useAppStore.getState().toasts.at(-1)).toMatchObject({ tone: 'error' });
   });
 

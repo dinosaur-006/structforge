@@ -4,7 +4,20 @@ import { api, ApiError } from '../services/api';
 import { mockAnalysisResult } from '../mocks/analysisResult';
 import { mockVersions } from '../mocks/versions';
 import { uid } from '../shared/format';
-import type { Asset, FinalScript, FinalScriptStyle, MaterialGap, Project, ResultVersion, ScriptSegment, ToastMessage, VideoStructure } from '../shared/types';
+import type {
+  Asset,
+  FinalScript,
+  FinalScriptStyle,
+  MaterialGap,
+  Project,
+  RenderResolution,
+  RenderStatus,
+  RenderVersion,
+  ResultVersion,
+  ScriptSegment,
+  ToastMessage,
+  VideoStructure,
+} from '../shared/types';
 
 const analysisStages = [
   '\u6b63\u5728\u62bd\u5e27...',
@@ -44,6 +57,11 @@ function initialState() {
     currentVersionId: 'original',
     currentScript: null,
     scriptLoading: false,
+    renderJobId: null,
+    renderStatus: 'idle' as RenderStatus,
+    renderProgress: 0,
+    outputUrl: null,
+    renderError: null,
     isExporting: false,
     toasts: [] as ToastMessage[],
   };
@@ -75,6 +93,11 @@ interface AppState {
   currentVersionId: string;
   currentScript: FinalScript | null;
   scriptLoading: boolean;
+  renderJobId: string | null;
+  renderStatus: RenderStatus;
+  renderProgress: number;
+  outputUrl: string | null;
+  renderError: string | null;
   isExporting: boolean;
   toasts: ToastMessage[];
   toggleSidebar: () => void;
@@ -105,6 +128,8 @@ interface AppState {
   fixGaps: () => Promise<void>;
   migrateScript: (projectId: string, style?: FinalScriptStyle) => Promise<FinalScript | undefined>;
   loadFinalScript: (projectId: string) => Promise<void>;
+  startRender: (projectId: string, version: RenderVersion, resolution?: RenderResolution) => Promise<void>;
+  pollRenderJob: (jobId: string) => Promise<void>;
   setVersion: (id: string) => void;
   exportResult: () => Promise<void>;
   addToast: (toast: Omit<ToastMessage, 'id'>) => void;
@@ -444,6 +469,55 @@ export const useAppStore = create<AppState>()(
           get().addToast({ tone: 'error', title: '\u811a\u672c\u52a0\u8f7d\u5931\u8d25', description: message });
         } finally {
           set({ scriptLoading: false });
+        }
+      },
+      startRender: async (projectId, version, resolution = '1080p') => {
+        set({
+          isExporting: true,
+          renderStatus: 'pending',
+          renderProgress: 0,
+          renderError: null,
+          outputUrl: null,
+          apiError: null,
+          activeProjectId: projectId,
+        });
+        try {
+          const response = await api.startRender(projectId, version, resolution);
+          set({ renderJobId: response.job_id });
+          await get().pollRenderJob(response.job_id);
+        } catch (error) {
+          const message = getErrorMessage(error);
+          set({ isExporting: false, renderStatus: 'failed', renderError: message, apiError: message });
+          get().addToast({ tone: 'error', title: '\u6e32\u67d3\u5931\u8d25', description: message });
+        }
+      },
+      pollRenderJob: async (jobId) => {
+        try {
+          for (;;) {
+            const status = await api.getRenderJob(jobId);
+            set({
+              renderStatus: status.status,
+              renderProgress: status.progress,
+              outputUrl: status.output_url ?? null,
+              renderError: status.error ?? null,
+            });
+            if (status.status === 'completed') {
+              set({ isExporting: false });
+              get().addToast({ tone: 'success', title: '\u89c6\u9891\u751f\u6210\u5b8c\u6210' });
+              return;
+            }
+            if (status.status === 'failed') {
+              const message = status.error || '\u89c6\u9891\u6e32\u67d3\u5931\u8d25';
+              set({ isExporting: false, renderError: message });
+              get().addToast({ tone: 'error', title: '\u6e32\u67d3\u5931\u8d25', description: message });
+              return;
+            }
+            await wait(1000);
+          }
+        } catch (error) {
+          const message = getErrorMessage(error);
+          set({ isExporting: false, renderStatus: 'failed', renderError: message, apiError: message });
+          get().addToast({ tone: 'error', title: '\u6e32\u67d3\u8f6e\u8be2\u5931\u8d25', description: message });
         }
       },
       setVersion: (id) => set({ currentVersionId: id }),

@@ -3,10 +3,23 @@ import { useState } from 'react';
 import { Button } from '../ui/Button';
 import type { ResultTimelineSegment } from '../../shared/types';
 
-export function VideoPlayer({ timeline }: { timeline: ResultTimelineSegment[] }) {
+export function VideoPlayer({ timeline, src }: { timeline: ResultTimelineSegment[]; src?: string | null }) {
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(28);
   const total = Math.max(...timeline.map((segment) => segment.end), 1);
+
+  if (src) {
+    return (
+      <div className="rounded-lg border border-border bg-[#1A1A18] p-4 shadow-sm">
+        <video
+          data-testid="rendered-video"
+          className="aspect-[9/16] max-h-[560px] w-full rounded-lg bg-[#262622] object-contain md:aspect-video"
+          src={src}
+          controls
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-lg border border-border bg-[#1A1A18] p-4 shadow-sm">

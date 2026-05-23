@@ -1,4 +1,16 @@
-import type { Asset, FinalScript, FinalScriptStyle, MaterialGap, MatchStatus, Project, ScriptSegment, VideoStructure } from '../shared/types';
+import type {
+  Asset,
+  FinalScript,
+  FinalScriptStyle,
+  MaterialGap,
+  MatchStatus,
+  Project,
+  RenderResolution,
+  RenderStatus,
+  RenderVersion,
+  ScriptSegment,
+  VideoStructure,
+} from '../shared/types';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://127.0.0.1:8000';
 
@@ -59,6 +71,18 @@ export interface GapFixAllResponse {
   assets?: Asset[];
 }
 
+export interface RenderJobResponse {
+  job_id: string;
+}
+
+export interface RenderProgressResponse {
+  status: Exclude<RenderStatus, 'idle'>;
+  progress: number;
+  output_url?: string | null;
+  error?: string | null;
+  warnings: string[];
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const init: RequestInit = { ...options };
   const isFormData = init.body instanceof FormData;
@@ -117,6 +141,9 @@ export const api = {
   migrateVariant: (projectId: string, style: Exclude<FinalScriptStyle, 'default'>) =>
     request<FinalScript>(`/api/v1/migrate/${projectId}/variant`, { method: 'POST', body: JSON.stringify({ style }) }),
   getFinalScript: (projectId: string) => request<FinalScript>(`/api/v1/migrate/${projectId}`),
+  startRender: (projectId: string, version: RenderVersion, resolution: RenderResolution = '1080p') =>
+    request<RenderJobResponse>(`/api/v1/render/${projectId}`, { method: 'POST', body: JSON.stringify({ version, resolution }) }),
+  getRenderJob: (jobId: string) => request<RenderProgressResponse>(`/api/v1/render/${jobId}`),
   getStructure: (projectId: string) => request<VideoStructure>(`/api/v1/structure/${projectId}`),
   replaceStructure: (projectId: string, structure: VideoStructure) =>
     request<VideoStructure>(`/api/v1/structure/${projectId}`, { method: 'PUT', body: JSON.stringify(structure) }),

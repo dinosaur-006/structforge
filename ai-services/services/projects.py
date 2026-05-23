@@ -11,9 +11,15 @@ class ProjectNotFoundError(LookupError):
 
 
 class ProjectService:
-    def __init__(self, repository: SQLiteRepository, upload_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        repository: SQLiteRepository,
+        upload_dir: Path | None = None,
+        output_dir: Path | None = None,
+    ) -> None:
         self.repository = repository
         self.upload_dir = upload_dir
+        self.output_dir = output_dir
 
     def create_project(self, *, name: str, description: str = "") -> dict:
         return self._to_project_out(self.repository.create_project(name=name, description=description))
@@ -48,6 +54,8 @@ class ProjectService:
             raise ProjectNotFoundError(f"Project not found: {project_id}")
         if self.upload_dir is not None:
             shutil.rmtree(self.upload_dir / project_id, ignore_errors=True)
+        if self.output_dir is not None:
+            shutil.rmtree(self.output_dir / project_id, ignore_errors=True)
 
     def _to_project_out(self, project: dict) -> dict:
         return {

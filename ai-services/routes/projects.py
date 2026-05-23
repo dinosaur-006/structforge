@@ -10,7 +10,11 @@ from services.projects import ProjectNotFoundError, ProjectService
 
 def build_projects_router(repository: SQLiteRepository, settings: Settings | None = None) -> APIRouter:
     router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
-    service = ProjectService(repository, upload_dir=settings.upload_dir if settings else None)
+    service = ProjectService(
+        repository,
+        upload_dir=settings.upload_dir if settings else None,
+        output_dir=settings.output_dir if settings else None,
+    )
 
     @router.post("", response_model=ProjectOut)
     async def create_project(payload: ProjectCreate) -> dict:
