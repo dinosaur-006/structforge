@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from services.llm_structure import StructureExtractionError, extract_structure_with_retries
+from services.llm_structure import StructureExtractionError, _parse_json_content, extract_structure_with_retries
 from tests.test_schemas import valid_video_structure_payload
 
 
@@ -46,3 +46,25 @@ def test_llm_extraction_fails_after_three_invalid_attempts() -> None:
         )
 
     assert client.calls == 3
+
+
+def test_parse_json_content_extracts_object_from_markdown_response() -> None:
+    payload = _parse_json_content(
+        'Here is the result:\n```json\n{"ok": true, "nested": {"value": "brace } inside string"}}\n```'
+    )
+
+    assert payload == {"ok": True, "nested": {"value": "brace } inside string"}}
+
+
+def test_llm_extraction_normalizes_short_rhythm_series() -> None:
+    payload = valid_video_structure_payload()
+    payload["rhythm"] = payload["rhythm"][:3]
+    client = SequenceClient([payload])
+
+    structure = extract_structure_with_retries(
+        client=client,
+        prompt_context={"meta": {"duration": 35}},
+        max_attempts=1,
+    )
+
+    assert len(structure.rhythm) >= 5

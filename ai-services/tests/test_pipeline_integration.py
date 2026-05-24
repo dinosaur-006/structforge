@@ -52,6 +52,8 @@ def test_pipeline_generates_frontend_structure_from_short_video(tmp_path: Path) 
         db_path=tmp_path / "structforge.db",
         ffmpeg_path=ffmpeg,
         ffprobe_path=ffprobe,
+        doubao_llm_endpoint=None,
+        doubao_llm_api_key=None,
     )
     repository = SQLiteRepository(settings.db_path)
     repository.initialize()
@@ -71,6 +73,10 @@ def test_project_analyze_structure_api_integration(tmp_path: Path, monkeypatch) 
     monkeypatch.setenv("STRUCTFORGE_OUTPUT_DIR", str(tmp_path / "outputs"))
     monkeypatch.setenv("STRUCTFORGE_FFMPEG_PATH", ffmpeg)
     monkeypatch.setenv("STRUCTFORGE_FFPROBE_PATH", ffprobe)
+    monkeypatch.delenv("STRUCTFORGE_DOUBAO_LLM_ENDPOINT", raising=False)
+    monkeypatch.delenv("STRUCTFORGE_DOUBAO_LLM_API_KEY", raising=False)
+    monkeypatch.setenv("STRUCTFORGE_DOUBAO_LLM_ENDPOINT", "")
+    monkeypatch.setenv("STRUCTFORGE_DOUBAO_LLM_API_KEY", "")
     monkeypatch.setattr(
         main_module,
         "dispatch_analyze_task",

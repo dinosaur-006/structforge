@@ -65,14 +65,13 @@ class DoubaoSeedClient:
             json={
                 "model": self.settings.doubao_llm_model,
                 "messages": [{"role": "user", "content": prompt}],
-                "response_format": {"type": "json_object"},
             },
             timeout=90,
         )
         response.raise_for_status()
         payload = response.json()
         content = _extract_content(payload)
-        return json.loads(content) if isinstance(content, str) else content
+        return _parse_json_content(content) if isinstance(content, str) else content
 
 
 class LocalStructureClient:
@@ -102,7 +101,7 @@ def extract_structure_with_retries(
             raw_payload = client.complete_json(prompt)
             if isinstance(raw_payload, str):
                 raw_payload = json.loads(raw_payload)
-            return VideoStructure.model_validate(raw_payload)
+            return _normalize_structure(VideoStructure.model_validate(raw_payload))
         except (json.JSONDecodeError, ValidationError, StructureExtractionError) as exc:
             errors.append(str(exc))
 
@@ -217,3 +216,66 @@ def _extract_content(payload: dict[str, Any]) -> object:
     if "content" in payload:
         return payload["content"]
     return payload
+
+
+def _normalize_structure(structure: VideoStructure) -> VideoStructure:
+    if len(structure.rhythm) >= 5:
+        return structure
+    payload = structure.model_dump(mode="json", by_alias=True)
+    existing = payload.get("rhythm") or []
+    by_second = {float(point["second"]): point for point in existing}
+    duration = float(payload["meta"].get("duration") or 0)
+    if duration <= 0:
+        duration = max((float(point["second"]) for point in existing), default=4.0)
+    step = duration / 4 if duration else 1.0
+    for index in range(5):
+        second = round(index * step, 2)
+        by_second.setdefault(
+            second,
+            {
+                "second": second,
+                "cuts": 1 + (index % 3),
+                "emotion": round(min(1.0, 0.45 + index * 0.1), 2),
+                "highlight": index == 2,
+            },
+        )
+    payload["rhythm"] = [by_second[key] for key in sorted(by_second)][: max(5, len(by_second))]
+    return VideoStructure.model_validate(payload)
+
+
+def _parse_json_content(content: str) -> object:
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        candidate = _first_json_object(content)
+        if candidate is None:
+            raise
+        return json.loads(candidate)
+
+
+def _first_json_object(content: str) -> str | None:
+    start = content.find("{")
+    while start != -1:
+        depth = 0
+        in_string = False
+        escaped = False
+        for index in range(start, len(content)):
+            char = content[index]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+                continue
+            if char == '"':
+                in_string = True
+            elif char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    return content[start : index + 1]
+        start = content.find("{", start + 1)
+    return None
