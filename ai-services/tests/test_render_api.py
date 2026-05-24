@@ -137,6 +137,46 @@ def test_project_delete_removes_render_outputs(tmp_path: Path) -> None:
     assert not project_output_dir.exists()
 
 
+def test_svg_image_assets_fallback_to_placeholder_warning(tmp_path: Path, monkeypatch) -> None:
+    from services import compositor as compositor_module
+    from services.compositor import Compositor
+
+    repository = seeded_repository(tmp_path)
+    svg_path = tmp_path / "uploads" / "proj-1" / "assets" / "gap.svg"
+    svg_path.parent.mkdir(parents=True)
+    svg_path.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920"></svg>', encoding="utf-8")
+    asset = repository.create_asset(
+        project_id="proj-1",
+        name="gap.svg",
+        asset_type="image",
+        file_path=str(svg_path),
+        tag="packaging",
+        analysis={"description": "Packaging fill"},
+    )
+    script = final_script_payload()
+    script["segments"][0]["asset_id"] = asset["id"]
+    repository.save_project_script("proj-1", script)
+    settings = Settings(db_path=tmp_path / "structforge.db", output_dir=tmp_path / "outputs")
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str]) -> None:
+        commands.append(command)
+        Path(command[-1]).parent.mkdir(parents=True, exist_ok=True)
+        Path(command[-1]).write_bytes(b"fake mp4")
+
+    monkeypatch.setattr(compositor_module, "_run", fake_run)
+    job = repository.create_render_job(project_id="proj-1", version="original")
+
+    Compositor(repository, settings).render(job_id=job["id"], project_id="proj-1", version="original", resolution="720p")
+
+    loaded = repository.get_render_job(job["id"])
+    assert loaded is not None
+    assert loaded["status"] == "completed"
+    assert any("unsupported svg asset" in warning for warning in loaded["warnings"])
+    assert commands[0][1:4] == ["-y", "-f", "lavfi"]
+    assert str(svg_path) not in commands[0]
+
+
 def render_client(repository: SQLiteRepository, settings: Settings, fake: FakeCompositor) -> TestClient:
     app = FastAPI()
     app.include_router(

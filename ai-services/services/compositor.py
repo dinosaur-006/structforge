@@ -66,17 +66,30 @@ class Compositor:
                         segment_type=segment.type,
                     )
                 elif asset["type"] == "image":
-                    command = build_image_command(
-                        ffmpeg_path=self.settings.ffmpeg_path,
-                        input_path=source_path,
-                        output_path=segment_path,
-                        ass_path=ass_path,
-                        duration=max(segment.duration, 0.5),
-                        width=width,
-                        height=height,
-                        version=version,
-                        segment_type=segment.type,
-                    )
+                    if source_path.suffix.lower() == ".svg":
+                        warnings.append(f"unsupported svg asset {segment.asset_id}, used placeholder")
+                        command = build_placeholder_command(
+                            ffmpeg_path=self.settings.ffmpeg_path,
+                            output_path=segment_path,
+                            ass_path=ass_path,
+                            duration=max(segment.duration, 0.5),
+                            width=width,
+                            height=height,
+                            version=version,
+                            segment_type=segment.type,
+                        )
+                    else:
+                        command = build_image_command(
+                            ffmpeg_path=self.settings.ffmpeg_path,
+                            input_path=source_path,
+                            output_path=segment_path,
+                            ass_path=ass_path,
+                            duration=max(segment.duration, 0.5),
+                            width=width,
+                            height=height,
+                            version=version,
+                            segment_type=segment.type,
+                        )
                 else:
                     command = build_video_command(
                         ffmpeg_path=self.settings.ffmpeg_path,
