@@ -42,11 +42,15 @@ export function GapPanel({ gaps, isFixing, onFixAll, onFixGap }: GapPanelProps) 
                         type="radio"
                         aria-label={strategy.name}
                         checked={strategy.id === (selectedStrategies[gap.id] ?? gap.selectedStrategyId)}
+                        disabled={!strategy.available}
                         onChange={() => setSelectedStrategies((current) => ({ ...current, [gap.id]: strategy.id }))}
                       />
                       {strategy.name}
                     </span>
                     <span className="mt-1 block text-text-secondary">{strategy.description}</span>
+                    {!strategy.available && strategy.unavailableReason ? (
+                      <span className="mt-1 block text-xs text-warning">{strategy.unavailableReason}</span>
+                    ) : null}
                   </label>
                 ))}
               </div>

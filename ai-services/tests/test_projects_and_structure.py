@@ -40,7 +40,7 @@ def test_repository_migrates_existing_projects_table_idempotently(tmp_path: Path
     with repository.engine.begin() as connection:
         columns = {row[1] for row in connection.execute(text("PRAGMA table_info(projects)"))}
 
-    assert {"description", "current_structure", "undo_stack", "redo_stack"}.issubset(columns)
+    assert {"description", "brief_json", "current_structure", "undo_stack", "redo_stack", "reference_job_id"}.issubset(columns)
 
 
 def test_project_service_creates_lists_updates_and_deletes_project(tmp_path: Path) -> None:
@@ -48,14 +48,23 @@ def test_project_service_creates_lists_updates_and_deletes_project(tmp_path: Pat
     repository.initialize()
     service = ProjectService(repository)
 
-    project = service.create_project(name="Launch A", description="First")
+    brief = {
+        "productName": "Air Quiet Pro",
+        "sellingPoints": ["主动降噪", "通勤舒适"],
+        "targetAudience": "都市通勤用户",
+        "offer": "首发优惠 299 元",
+        "tone": "克制高级",
+        "mandatoryClaims": ["两年质保"],
+    }
+    project = service.create_project(name="Launch A", description="First", brief=brief)
     service.create_project(name="Launch B", description="Second")
     updated = service.update_project(project["id"], name="Launch A revised")
     projects = service.list_projects()
 
     assert updated["name"] == "Launch A revised"
     assert projects[0]["updatedAt"] >= projects[1]["updatedAt"]
-    assert set(projects[0]) == {"id", "name", "description", "status", "updatedAt"}
+    assert project["brief"] == brief
+    assert set(projects[0]) == {"id", "name", "description", "brief", "status", "updatedAt"}
 
     service.delete_project(project["id"])
     with pytest.raises(ProjectNotFoundError):

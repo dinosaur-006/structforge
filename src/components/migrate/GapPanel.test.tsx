@@ -14,8 +14,8 @@ const gap: MaterialGap = {
   recommendedStrategy: 'packaging',
   status: 'open',
   strategies: [
-    { id: 'packaging', name: '包装补全', description: '生成包装图' },
-    { id: 'aigc', name: 'AIGC 生成', description: '生成背景图' },
+    { id: 'packaging', name: '包装补全', description: '生成包装图', available: true },
+    { id: 'aigc', name: 'AIGC 生成', description: '生成背景图', available: false, unavailableReason: '需配置即梦 API' },
   ],
 };
 
@@ -26,9 +26,11 @@ describe('GapPanel', () => {
     render(<GapPanel gaps={[gap]} isFixing={false} onFixAll={vi.fn()} onFixGap={onFixGap} />);
 
     expect(screen.getByText('Hook 素材缺口')).toBeInTheDocument();
-    await user.click(screen.getByLabelText('AIGC 生成'));
+    await user.click(screen.getByLabelText('包装补全'));
     await user.click(screen.getByRole('button', { name: '应用选中策略' }));
 
-    expect(onFixGap).toHaveBeenCalledWith('gap-seg-1', 'aigc');
+    expect(screen.getByLabelText('AIGC 生成')).toBeDisabled();
+    expect(screen.getByText('需配置即梦 API')).toBeInTheDocument();
+    expect(onFixGap).toHaveBeenCalledWith('gap-seg-1', 'packaging');
   });
 });

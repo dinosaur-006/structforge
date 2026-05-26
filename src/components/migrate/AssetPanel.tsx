@@ -25,6 +25,7 @@ function AssetCard({ asset }: { asset: Asset }) {
         <p className="truncate text-sm font-semibold">{asset.name}</p>
         <p className="mt-1 text-xs text-text-secondary">{asset.tag}</p>
         <Badge className="mt-2" tone={tone}>{asset.matchScore}%</Badge>
+        <p className="mt-2 line-clamp-2 text-xs leading-5 text-text-secondary">{asset.reason}</p>
       </div>
     </div>
   );

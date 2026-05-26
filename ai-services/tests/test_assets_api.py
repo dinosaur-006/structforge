@@ -30,6 +30,7 @@ def test_assets_schema_migration_is_idempotent(tmp_path: Path) -> None:
         "match_status",
         "match_score",
         "analysis_json",
+        "origin",
         "created_at",
         "updated_at",
     }.issubset(columns)
@@ -71,7 +72,8 @@ def test_asset_uploads_return_frontend_safe_assets_and_match_matrix(tmp_path: Pa
     assets = listed.json()
     assert len(assets) == 3
     assert {asset["type"] for asset in assets} == {"image", "video", "text"}
-    assert set(assets[0]) == {"id", "name", "type", "tag", "matchStatus", "matchScore", "color"}
+    assert set(assets[0]) == {"id", "name", "type", "tag", "matchStatus", "matchScore", "color", "origin", "recommendedSegments", "reason"}
+    assert {asset["origin"] for asset in assets} == {"uploaded"}
 
     matrix = client.get("/api/v1/assets/proj-1/match")
     assert matrix.status_code == 200
@@ -85,6 +87,9 @@ def test_asset_uploads_return_frontend_safe_assets_and_match_matrix(tmp_path: Pa
 
     matched_assets = client.get("/api/v1/assets/proj-1").json()
     assert any(asset["matchStatus"] == "matched" for asset in matched_assets)
+    cta_asset = next(asset for asset in matched_assets if asset["name"] == "offer.txt")
+    assert cta_asset["recommendedSegments"][0]["segmentId"] == "seg-3"
+    assert "CTA" in cta_asset["reason"]
 
 
 def test_empty_analysis_json_asset_stays_unmatched(tmp_path: Path) -> None:

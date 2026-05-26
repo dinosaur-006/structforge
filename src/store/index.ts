@@ -2,14 +2,15 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { api, ApiError } from '../services/api';
 import { mockAnalysisResult } from '../mocks/analysisResult';
-import { mockVersions } from '../mocks/versions';
 import { uid } from '../shared/format';
 import type {
+  AnalysisSample,
   Asset,
   FinalScript,
   FinalScriptStyle,
   MaterialGap,
   Project,
+  ProjectBrief,
   RenderResolution,
   RenderStatus,
   RenderVersion,
@@ -43,6 +44,8 @@ function initialState() {
     progress: 0,
     stage: analysisStages[0],
     analysisResult: null,
+    analysisSamples: [] as AnalysisSample[],
+    sampleLoading: false,
     currentStructure: null,
     assets: [] as Asset[],
     assetLoading: false,
@@ -53,7 +56,8 @@ function initialState() {
     drawerOpen: false,
     history: [] as VideoStructure[],
     future: [] as VideoStructure[],
-    versions: [...mockVersions],
+    versions: [] as ResultVersion[],
+    evaluationLabel: '',
     currentVersionId: 'original',
     currentScript: null,
     scriptLoading: false,
@@ -79,6 +83,8 @@ interface AppState {
   progress: number;
   stage: string;
   analysisResult: VideoStructure | null;
+  analysisSamples: AnalysisSample[];
+  sampleLoading: boolean;
   currentStructure: VideoStructure | null;
   assets: Asset[];
   assetLoading: boolean;
@@ -90,6 +96,7 @@ interface AppState {
   history: VideoStructure[];
   future: VideoStructure[];
   versions: ResultVersion[];
+  evaluationLabel: string;
   currentVersionId: string;
   currentScript: FinalScript | null;
   scriptLoading: boolean;
@@ -104,11 +111,14 @@ interface AppState {
   setMobileSidebarOpen: (open: boolean) => void;
   setRouteLoading: (loading: boolean) => void;
   fetchProjects: () => Promise<void>;
-  addProject: (name: string, description: string) => Promise<string>;
+  addProject: (name: string, description: string, brief?: ProjectBrief) => Promise<string>;
+  updateProjectBrief: (id: string, brief: ProjectBrief) => Promise<void>;
   removeProject: (id: string) => Promise<void>;
   findProject: (id: string) => Project | undefined;
   setVideoFile: (file: File | null) => void;
   startAnalysis: (projectId?: string) => Promise<string | undefined>;
+  fetchAnalysisSamples: (projectId: string) => Promise<void>;
+  selectReferenceSample: (projectId: string, jobId: string) => Promise<void>;
   resetAnalysis: () => void;
   completeAnalysisNow: () => void;
   loadProjectStructure: (projectId: string) => Promise<void>;
@@ -128,7 +138,8 @@ interface AppState {
   fixGaps: () => Promise<void>;
   migrateScript: (projectId: string, style?: FinalScriptStyle) => Promise<FinalScript | undefined>;
   loadFinalScript: (projectId: string) => Promise<void>;
-  startRender: (projectId: string, version: RenderVersion, resolution?: RenderResolution) => Promise<void>;
+  fetchResultVersions: (projectId: string) => Promise<void>;
+  startRender: (projectId: string, version: RenderVersion, resolution?: RenderResolution, scriptVersion?: FinalScriptStyle) => Promise<void>;
   pollRenderJob: (jobId: string) => Promise<void>;
   setVersion: (id: string) => void;
   exportResult: () => Promise<void>;
@@ -169,10 +180,10 @@ export const useAppStore = create<AppState>()(
           set({ routeLoading: false });
         }
       },
-      addProject: async (name, description) => {
+      addProject: async (name, description, brief) => {
         set({ routeLoading: true, apiError: null });
         try {
-          const project = await api.createProject({ name, description });
+          const project = await api.createProject({ name, description, ...(brief ? { brief } : {}) });
           set((state) => ({ projects: [project, ...state.projects], activeProjectId: project.id }));
           return project.id;
         } catch (error) {
@@ -180,6 +191,22 @@ export const useAppStore = create<AppState>()(
           set({ apiError: message });
           get().addToast({ tone: 'error', title: '\u9879\u76ee\u521b\u5efa\u5931\u8d25', description: message });
           return '';
+        } finally {
+          set({ routeLoading: false });
+        }
+      },
+      updateProjectBrief: async (id, brief) => {
+        set({ routeLoading: true, apiError: null });
+        try {
+          const project = await api.updateProject(id, { brief });
+          set((state) => ({
+            projects: state.projects.map((item) => (item.id === id ? project : item)),
+          }));
+          get().addToast({ tone: 'success', title: '\u521b\u4f5c\u7b80\u62a5\u5df2\u4fdd\u5b58' });
+        } catch (error) {
+          const message = getErrorMessage(error);
+          set({ apiError: message });
+          get().addToast({ tone: 'error', title: '\u521b\u4f5c\u7b80\u62a5\u4fdd\u5b58\u5931\u8d25', description: message });
         } finally {
           set({ routeLoading: false });
         }
@@ -234,6 +261,7 @@ export const useAppStore = create<AppState>()(
                 activeProjectId: targetProjectId,
                 gaps: [],
               });
+              await get().fetchAnalysisSamples(targetProjectId);
               await get().fetchProjects();
               return targetProjectId;
             }
@@ -245,6 +273,35 @@ export const useAppStore = create<AppState>()(
           set({ isAnalyzing: false, apiError: message });
           get().addToast({ tone: 'error', title: '\u5206\u6790\u5931\u8d25', description: message });
           return undefined;
+        }
+      },
+      fetchAnalysisSamples: async (projectId) => {
+        set({ sampleLoading: true, apiError: null });
+        try {
+          const analysisSamples = await api.listAnalysisSamples(projectId);
+          set({ analysisSamples, activeProjectId: projectId });
+        } catch (error) {
+          const message = getErrorMessage(error);
+          set({ apiError: message });
+          get().addToast({ tone: 'error', title: '样例加载失败', description: message });
+        } finally {
+          set({ sampleLoading: false });
+        }
+      },
+      selectReferenceSample: async (projectId, jobId) => {
+        set({ sampleLoading: true, apiError: null });
+        try {
+          const sample = await api.selectAnalysisReference(projectId, jobId);
+          if (!sample.result) throw new Error('样例结果不可用');
+          set({ analysisResult: sample.result, currentStructure: sample.result, activeProjectId: projectId });
+          await get().fetchAnalysisSamples(projectId);
+          get().addToast({ tone: 'success', title: '已更新结构模板' });
+        } catch (error) {
+          const message = getErrorMessage(error);
+          set({ apiError: message });
+          get().addToast({ tone: 'error', title: '模板选择失败', description: message });
+        } finally {
+          set({ sampleLoading: false });
         }
       },
       resetAnalysis: () => set({ videoFile: null, isAnalyzing: false, progress: 0, stage: analysisStages[0], analysisResult: null }),
@@ -471,7 +528,20 @@ export const useAppStore = create<AppState>()(
           set({ scriptLoading: false });
         }
       },
-      startRender: async (projectId, version, resolution = '1080p') => {
+      fetchResultVersions: async (projectId) => {
+        try {
+          const response = await api.getResultVersions(projectId);
+          const versions = [response.baseline, ...response.versions];
+          const desiredId = get().currentScript?.version ?? get().currentVersionId;
+          const currentVersionId = versions.some((version) => version.id === desiredId) ? desiredId : response.baseline.id;
+          set({ versions, evaluationLabel: response.evaluationLabel, currentVersionId });
+        } catch (error) {
+          const message = getErrorMessage(error);
+          set({ apiError: message, versions: [], evaluationLabel: '' });
+          get().addToast({ tone: 'error', title: '\u8bc4\u4f30\u6570\u636e\u52a0\u8f7d\u5931\u8d25', description: message });
+        }
+      },
+      startRender: async (projectId, version, resolution = '1080p', scriptVersion) => {
         set({
           isExporting: true,
           renderStatus: 'pending',
@@ -482,7 +552,7 @@ export const useAppStore = create<AppState>()(
           activeProjectId: projectId,
         });
         try {
-          const response = await api.startRender(projectId, version, resolution);
+          const response = await api.startRender(projectId, version, resolution, scriptVersion);
           set({ renderJobId: response.job_id });
           await get().pollRenderJob(response.job_id);
         } catch (error) {

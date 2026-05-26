@@ -31,6 +31,23 @@ describe('api client', () => {
     );
   });
 
+  it('updates a structured creative brief', async () => {
+    const brief = { productName: 'Quiet Pro', sellingPoints: ['降噪'], targetAudience: '通勤人士', offer: '299 元', tone: '专业', mandatoryClaims: [] };
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ id: 'proj-1', name: 'Launch', description: '', brief, status: 'draft', updatedAt: '2026-05-23T00:00:00Z' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await api.updateProject('proj-1', { brief });
+
+    expect(fetch).toHaveBeenCalledWith(
+      'http://127.0.0.1:8000/api/v1/projects/proj-1',
+      expect.objectContaining({ method: 'PUT', body: JSON.stringify({ brief }) }),
+    );
+  });
+
   it('does not set json content type for form data uploads', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(JSON.stringify({ job_id: 'job-1' }), {
@@ -110,6 +127,37 @@ describe('api client', () => {
     expect(fetch).toHaveBeenNthCalledWith(3, 'http://127.0.0.1:8000/api/v1/migrate/proj-1', {});
   });
 
+  it('loads rule-evaluated generated versions', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ evaluationLabel: '结构规则评估', baseline: { id: 'original' }, versions: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await api.getResultVersions('proj-1');
+
+    expect(fetch).toHaveBeenCalledWith('http://127.0.0.1:8000/api/v1/migrate/proj-1/versions', {});
+  });
+
+  it('lists project samples and selects a reference baseline', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ job_id: 'job-2', isReference: true }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+      );
+
+    await api.listAnalysisSamples('proj-1');
+    await api.selectAnalysisReference('proj-1', 'job-2');
+
+    expect(fetch).toHaveBeenNthCalledWith(1, 'http://127.0.0.1:8000/api/v1/analyze/project/proj-1/samples', {});
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      'http://127.0.0.1:8000/api/v1/analyze/project/proj-1/reference/job-2',
+      expect.objectContaining({ method: 'PUT' }),
+    );
+  });
+
   it('calls render endpoints with version and resolution', async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(
@@ -125,13 +173,13 @@ describe('api client', () => {
         }),
       );
 
-    await api.startRender('proj-1', 'strong_hook', '1080p');
+    await api.startRender('proj-1', 'strong_hook', '1080p', 'high_click');
     await api.getRenderJob('render-1');
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
       'http://127.0.0.1:8000/api/v1/render/proj-1',
-      expect.objectContaining({ method: 'POST', body: JSON.stringify({ version: 'strong_hook', resolution: '1080p' }) }),
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ version: 'strong_hook', resolution: '1080p', script_version: 'high_click' }) }),
     );
     expect(fetch).toHaveBeenNthCalledWith(2, 'http://127.0.0.1:8000/api/v1/render/render-1', {});
   });

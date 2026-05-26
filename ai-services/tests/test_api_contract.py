@@ -43,3 +43,23 @@ def test_non_video_upload_returns_400(tmp_path, monkeypatch) -> None:
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Only video files are supported"
+
+
+def test_capabilities_expose_readiness_without_credentials(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("STRUCTFORGE_DB_PATH", str(tmp_path / "structforge.db"))
+    monkeypatch.setenv("STRUCTFORGE_DOUBAO_LLM_ENDPOINT", "https://example.invalid/llm")
+    monkeypatch.setenv("STRUCTFORGE_DOUBAO_LLM_API_KEY", "do-not-return-this-key")
+    monkeypatch.delenv("STRUCTFORGE_DOUBAO_VISION_ENDPOINT", raising=False)
+    monkeypatch.delenv("STRUCTFORGE_DOUBAO_VISION_API_KEY", raising=False)
+    monkeypatch.setenv("STRUCTFORGE_CELERY_TASK_ALWAYS_EAGER", "true")
+    client = TestClient(create_app())
+
+    response = client.get("/api/v1/capabilities")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["llm"]["state"] == "configured"
+    assert payload["llm"]["detail"] == "已提供 LLM 配置；首次真实生成时验证授权可用性"
+    assert payload["vision"]["state"] == "fallback"
+    assert payload["taskExecution"]["state"] == "inline"
+    assert "do-not-return-this-key" not in response.text

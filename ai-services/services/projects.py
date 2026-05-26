@@ -21,8 +21,8 @@ class ProjectService:
         self.upload_dir = upload_dir
         self.output_dir = output_dir
 
-    def create_project(self, *, name: str, description: str = "") -> dict:
-        return self._to_project_out(self.repository.create_project(name=name, description=description))
+    def create_project(self, *, name: str, description: str = "", brief: dict | None = None) -> dict:
+        return self._to_project_out(self.repository.create_project(name=name, description=description, brief=brief))
 
     def list_projects(self) -> list[dict]:
         return [self._to_project_out(project) for project in self.repository.list_projects()]
@@ -39,11 +39,13 @@ class ProjectService:
         *,
         name: str | None = None,
         description: str | None = None,
+        brief: dict | None = None,
     ) -> dict:
         project = self.repository.update_project(
             project_id,
             name=name,
             description=description,
+            brief=brief,
         )
         if project is None:
             raise ProjectNotFoundError(f"Project not found: {project_id}")
@@ -62,6 +64,7 @@ class ProjectService:
             "id": project["id"],
             "name": project["name"],
             "description": project.get("description") or "",
+            "brief": project.get("brief") or {},
             "status": project["status"],
             "updatedAt": project["updated_at"],
         }

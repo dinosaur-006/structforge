@@ -87,23 +87,61 @@ class AnalyzeResponse(StrictModel):
     job_id: str
 
 
+class AnalysisSampleOut(StrictModel):
+    job_id: str
+    status: JobStatus
+    progress: int = Field(ge=0, le=100)
+    stage: str
+    result: VideoStructure | None = None
+    isReference: bool
+
+
+CapabilityState = Literal["configured", "fallback", "disabled", "inline", "worker"]
+
+
+class CapabilityItem(StrictModel):
+    state: CapabilityState
+    label: str
+    detail: str
+
+
+class CapabilityStatusOut(StrictModel):
+    llm: CapabilityItem
+    vision: CapabilityItem
+    asr: CapabilityItem
+    aigc: CapabilityItem
+    taskExecution: CapabilityItem
+
+
 ProjectStatus = Literal["draft", "analyzing", "editing", "rendering", "completed"]
+
+
+class ProjectBrief(StrictModel):
+    productName: str = ""
+    sellingPoints: list[str] = Field(default_factory=list)
+    targetAudience: str = ""
+    offer: str = ""
+    tone: str = ""
+    mandatoryClaims: list[str] = Field(default_factory=list)
 
 
 class ProjectCreate(StrictModel):
     name: str = Field(min_length=1)
     description: str = ""
+    brief: ProjectBrief = Field(default_factory=ProjectBrief)
 
 
 class ProjectUpdate(StrictModel):
     name: str | None = None
     description: str | None = None
+    brief: ProjectBrief | None = None
 
 
 class ProjectOut(StrictModel):
     id: str
     name: str
     description: str
+    brief: ProjectBrief
     status: ProjectStatus
     updatedAt: str
 
@@ -120,6 +158,13 @@ class StructureActionResponse(StrictModel):
 
 AssetType = Literal["image", "video", "text"]
 MatchStatus = Literal["matched", "partial", "unmatched"]
+AssetOrigin = Literal["uploaded", "packaging", "aigc", "recompose"]
+
+
+class AssetRecommendation(StrictModel):
+    segmentId: str
+    label: str
+    score: float = Field(ge=0, le=100)
 
 
 class AssetOut(StrictModel):
@@ -130,6 +175,9 @@ class AssetOut(StrictModel):
     matchStatus: MatchStatus
     matchScore: float = Field(ge=0, le=100)
     color: str
+    origin: AssetOrigin
+    recommendedSegments: list[AssetRecommendation] = Field(default_factory=list)
+    reason: str
 
 
 class AssetAnalyzeResponse(StrictModel):
@@ -157,6 +205,8 @@ class GapStrategy(StrictModel):
     id: GapStrategyId
     name: str
     description: str
+    available: bool
+    unavailableReason: str | None = None
 
 
 class MaterialGapOut(StrictModel):
@@ -197,6 +247,7 @@ class GapFixAllResponse(StrictModel):
 
 
 FinalScriptStyle = Literal["high_click", "high_conversion", "fast_pace", "high_quality", "default"]
+FinalSegmentSource = Literal["original", "reorder", "packaging", "aigc", "recompose"]
 
 
 class FinalSegment(StrictModel):
@@ -211,6 +262,7 @@ class FinalSegment(StrictModel):
     subtitle_style: str
     transition: str
     locked: bool = False
+    source: FinalSegmentSource = "original"
 
 
 class FinalScript(StrictModel):
@@ -218,6 +270,52 @@ class FinalScript(StrictModel):
     total_duration: float = Field(ge=0)
     segments: list[FinalSegment] = Field(min_length=1)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ResultEvaluation(StrictModel):
+    health: HealthScores
+    material_coverage: float = Field(ge=0, le=100)
+    product_first_exposure: float | None = None
+    gap_count: int = Field(ge=0)
+    cta_duration: float = Field(ge=0)
+
+
+class ResultMetricComparison(StrictModel):
+    before: str
+    after: str
+    delta: str
+    positive: bool
+
+
+class ResultMetrics(StrictModel):
+    scoreDelta: int
+    materialCoverage: ResultMetricComparison
+    productExposure: ResultMetricComparison
+    gapCount: ResultMetricComparison
+    ctaDuration: ResultMetricComparison
+
+
+class ResultTimelineOut(StrictModel):
+    id: str
+    label: str
+    start: float
+    end: float
+    source: FinalSegmentSource
+
+
+class ResultVersionOut(StrictModel):
+    id: str
+    name: str
+    score: int
+    metrics: ResultMetrics
+    health: HealthScores
+    timeline: list[ResultTimelineOut]
+
+
+class ResultVersionsResponse(StrictModel):
+    evaluationLabel: str
+    baseline: ResultVersionOut
+    versions: list[ResultVersionOut]
 
 
 class MigrateRequest(StrictModel):
@@ -236,6 +334,7 @@ RenderResolution = Literal["720p", "1080p"]
 class RenderRequest(StrictModel):
     version: RenderVersion
     resolution: RenderResolution = "1080p"
+    script_version: FinalScriptStyle | None = None
 
 
 class RenderJobResponse(StrictModel):

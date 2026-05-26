@@ -4,7 +4,7 @@ from fastapi import APIRouter, Body, HTTPException
 
 from config import Settings
 from models.repository import SQLiteRepository
-from models.schemas import FinalScript, MigrateRequest, MigrateVariantRequest
+from models.schemas import FinalScript, MigrateRequest, MigrateVariantRequest, ResultVersionsResponse
 from services.llm_structure import JsonCompletionClient
 from services.migrator import MigrationError, MigrationInputError, MigrationNotFoundError, MigratorService
 
@@ -26,6 +26,15 @@ def build_migrate_router(
         if script is None:
             raise HTTPException(status_code=404, detail="Final script not found")
         return script
+
+    @router.get("/{project_id}/versions", response_model=ResultVersionsResponse)
+    async def get_versions(project_id: str) -> ResultVersionsResponse:
+        try:
+            return service.get_versions(project_id)
+        except MigrationNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Project not found") from exc
+        except MigrationInputError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @router.post("/{project_id}/variant", response_model=FinalScript)
     async def generate_variant(project_id: str, payload: MigrateVariantRequest) -> FinalScript:

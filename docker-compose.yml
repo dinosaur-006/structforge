@@ -1,0 +1,40 @@
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+
+  api:
+    build: ./ai-services
+    ports:
+      - "8000:8000"
+    environment: &backend-environment
+      STRUCTFORGE_CELERY_TASK_ALWAYS_EAGER: "false"
+      STRUCTFORGE_CELERY_BROKER_URL: redis://redis:6379/0
+      STRUCTFORGE_CELERY_RESULT_BACKEND: redis://redis:6379/0
+      STRUCTFORGE_DOUBAO_LLM_ENDPOINT: ${STRUCTFORGE_DOUBAO_LLM_ENDPOINT:-}
+      STRUCTFORGE_DOUBAO_LLM_API_KEY: ${STRUCTFORGE_DOUBAO_LLM_API_KEY:-}
+      STRUCTFORGE_DOUBAO_LLM_MODEL: ${STRUCTFORGE_DOUBAO_LLM_MODEL:-doubao-seed-2-0-lite}
+      STRUCTFORGE_DOUBAO_VISION_ENDPOINT: ${STRUCTFORGE_DOUBAO_VISION_ENDPOINT:-}
+      STRUCTFORGE_DOUBAO_VISION_API_KEY: ${STRUCTFORGE_DOUBAO_VISION_API_KEY:-}
+      STRUCTFORGE_JIMENG_IMAGE_ENDPOINT: ${STRUCTFORGE_JIMENG_IMAGE_ENDPOINT:-}
+      STRUCTFORGE_JIMENG_IMAGE_API_KEY: ${STRUCTFORGE_JIMENG_IMAGE_API_KEY:-}
+    depends_on:
+      - redis
+    volumes:
+      - ./data:/data
+
+  worker:
+    build: ./ai-services
+    command: ["celery", "-A", "tasks.celery_app.celery_app", "worker", "--loglevel=INFO"]
+    environment: *backend-environment
+    depends_on:
+      - redis
+    volumes:
+      - ./data:/data
+
+volumes:
+  redis-data:

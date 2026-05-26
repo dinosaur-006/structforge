@@ -60,6 +60,37 @@ class AssetMatcher:
 
         return matches
 
+    def recommend_project_assets(self, project_id: str) -> dict[str, dict[str, Any]]:
+        structure = self.structure_editor.get_structure(project_id)
+        matches = self.match_project_assets(project_id)
+        segment_by_id = {segment.id: segment for segment in structure.script}
+        recommendations: dict[str, dict[str, Any]] = {}
+        for asset in self.repository.list_assets(project_id):
+            ranked = sorted(
+                (match for match in matches if match["asset_id"] == asset["id"] and match["score"] >= 50),
+                key=lambda match: match["score"],
+                reverse=True,
+            )[:2]
+            segments = [
+                {
+                    "segmentId": match["segment_id"],
+                    "label": segment_by_id[match["segment_id"]].label,
+                    "score": match["score"],
+                }
+                for match in ranked
+            ]
+            if segments:
+                recommendations[asset["id"]] = {
+                    "recommendedSegments": segments,
+                    "reason": f"适合 {segments[0]['label']}：{asset.get('tag') or asset['name']} 与该结构槽位需求匹配",
+                }
+            else:
+                recommendations[asset["id"]] = {
+                    "recommendedSegments": [],
+                    "reason": "暂无高可信推荐，建议补充更清晰的素材内容",
+                }
+        return recommendations
+
 
 def _asset_searchable_text(asset: dict[str, Any]) -> str:
     analysis = asset.get("analysis") or {}

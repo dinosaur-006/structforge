@@ -42,6 +42,7 @@ if Celery is not None:
         "structforge",
         broker=settings.celery_broker_url,
         backend=settings.celery_result_backend,
+        include=["tasks.analyze", "tasks.render"],
     )
     celery_app.conf.update(task_always_eager=settings.celery_task_always_eager)
 else:

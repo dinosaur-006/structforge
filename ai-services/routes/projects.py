@@ -18,7 +18,11 @@ def build_projects_router(repository: SQLiteRepository, settings: Settings | Non
 
     @router.post("", response_model=ProjectOut)
     async def create_project(payload: ProjectCreate) -> dict:
-        return service.create_project(name=payload.name, description=payload.description)
+        return service.create_project(
+            name=payload.name,
+            description=payload.description,
+            brief=payload.brief.model_dump(mode="json"),
+        )
 
     @router.get("", response_model=list[ProjectOut])
     async def list_projects() -> list[dict]:
@@ -38,6 +42,7 @@ def build_projects_router(repository: SQLiteRepository, settings: Settings | Non
                 project_id,
                 name=payload.name,
                 description=payload.description,
+                brief=payload.brief.model_dump(mode="json") if payload.brief is not None else None,
             )
         except ProjectNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Project not found") from exc

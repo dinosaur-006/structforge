@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 from fastapi.testclient import TestClient
 
 from main import create_app
@@ -13,12 +15,24 @@ def test_project_api_crud_returns_frontend_safe_fields(tmp_path, monkeypatch) ->
 
     created = client.post(
         "/api/v1/projects",
-        json={"name": "Headphone launch", "description": "Q3 push"},
+        json={
+            "name": "Headphone launch",
+            "description": "Q3 push",
+            "brief": {
+                "productName": "Quiet Pro",
+                "sellingPoints": ["降噪", "轻盈"],
+                "targetAudience": "通勤人士",
+                "offer": "到手价 299 元",
+                "tone": "专业",
+                "mandatoryClaims": [],
+            },
+        },
     )
     assert created.status_code == 200
     project = created.json()
-    assert set(project) == {"id", "name", "description", "status", "updatedAt"}
+    assert set(project) == {"id", "name", "description", "brief", "status", "updatedAt"}
     assert project["status"] == "draft"
+    assert project["brief"]["productName"] == "Quiet Pro"
 
     listed = client.get("/api/v1/projects")
     assert listed.status_code == 200
@@ -115,3 +129,36 @@ def test_structure_api_empty_undo_returns_complete_structure(tmp_path, monkeypat
     assert response.status_code == 200
     assert response.json()["available"] is False
     assert response.json()["structure"]["meta"]["duration"] == 35.0
+
+
+def test_multiple_samples_require_explicit_reference_switch(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("STRUCTFORGE_DB_PATH", str(tmp_path / "structforge.db"))
+    repository = SQLiteRepository(tmp_path / "structforge.db")
+    repository.initialize()
+    repository.upsert_project(project_id="proj-1", name="Headphones", status="analyzing")
+    first = valid_video_structure_payload()
+    second = deepcopy(first)
+    second["script"][0]["copy"] = "Second reference hook"
+
+    repository.create_job("job-1", "sample-one.mp4", project_id="proj-1")
+    repository.complete_job("job-1", first)
+    edited = deepcopy(first)
+    edited["script"][0]["copy"] = "User edited hook"
+    repository.save_project_structure_state("proj-1", current_structure=edited, undo_stack=[], redo_stack=[])
+    repository.create_job("job-2", "sample-two.mp4", project_id="proj-1")
+    repository.complete_job("job-2", second)
+
+    client = TestClient(create_app())
+    samples = client.get("/api/v1/analyze/project/proj-1/samples")
+    structure_before = client.get("/api/v1/structure/proj-1")
+    selected = client.put("/api/v1/analyze/project/proj-1/reference/job-2")
+    structure_after = client.get("/api/v1/structure/proj-1")
+
+    assert samples.status_code == 200
+    assert [sample["job_id"] for sample in samples.json()] == ["job-1", "job-2"]
+    assert samples.json()[0]["isReference"] is True
+    assert structure_before.json()["script"][0]["copy"] == "User edited hook"
+    assert selected.status_code == 200
+    assert selected.json()["job_id"] == "job-2"
+    assert selected.json()["isReference"] is True
+    assert structure_after.json()["script"][0]["copy"] == "Second reference hook"

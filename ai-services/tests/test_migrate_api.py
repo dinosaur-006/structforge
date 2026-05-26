@@ -73,6 +73,17 @@ def test_repository_migrates_and_persists_script_json(tmp_path: Path) -> None:
     assert len(loaded["segments"]) == 5
 
 
+def test_repository_creates_script_versions_table_idempotently(tmp_path: Path) -> None:
+    repository = SQLiteRepository(tmp_path / "structforge.db")
+    repository.initialize()
+    repository.initialize()
+
+    with repository.engine.begin() as connection:
+        columns = {row[1] for row in connection.execute(text("PRAGMA table_info(script_versions)"))}
+
+    assert {"project_id", "version", "script_json", "evaluation_json", "created_at", "updated_at"}.issubset(columns)
+
+
 def test_migrator_generates_valid_script_and_records_warnings(tmp_path: Path) -> None:
     repository = seeded_repository(tmp_path, description="Premium sleep earbuds for busy professionals")
     repository.create_asset(
@@ -99,6 +110,36 @@ def test_migrator_generates_valid_script_and_records_warnings(tmp_path: Path) ->
     assert "Premium sleep earbuds" in client.prompts[0]
 
 
+def test_migrator_derives_segment_source_from_asset_origin(tmp_path: Path) -> None:
+    repository = seeded_repository(tmp_path, description="Premium sleep earbuds for busy professionals")
+    uploaded = repository.create_asset(
+        project_id="proj-1",
+        name="hook.jpg",
+        asset_type="image",
+        file_path=None,
+        tag="冲突画面",
+        analysis={"description": "冲突画面"},
+        origin="uploaded",
+    )
+    packaging = repository.create_asset(
+        project_id="proj-1",
+        name="cta.png",
+        asset_type="image",
+        file_path=None,
+        tag="优惠购买",
+        analysis={"description": "包装补全"},
+        origin="packaging",
+    )
+    payload = final_script_payload(version="high_click")
+    payload["segments"][0]["asset_id"] = uploaded["id"]
+    payload["segments"][-1]["asset_id"] = packaging["id"]
+
+    script = MigratorService(repository, client=FakeJsonClient([payload])).generate("proj-1", style="high_click")
+
+    assert script.segments[0].source == "original"
+    assert script.segments[-1].source == "packaging"
+
+
 def test_migrator_uses_short_description_fallback_and_warns(tmp_path: Path) -> None:
     repository = seeded_repository(tmp_path, name="Headphones Pro", description="AI")
     client = FakeJsonClient([final_script_payload(version="fast_pace")])
@@ -109,6 +150,28 @@ def test_migrator_uses_short_description_fallback_and_warns(tmp_path: Path) -> N
     assert script.version == "fast_pace"
     assert "Headphones Pro" in client.prompts[0]
     assert "项目名称" in script.metadata["warnings"][0]
+
+
+def test_migrator_prefers_structured_project_brief(tmp_path: Path) -> None:
+    repository = seeded_repository(tmp_path, description="legacy description")
+    repository.update_project(
+        "proj-1",
+        brief={
+            "productName": "静谧 Pro 耳机",
+            "sellingPoints": ["主动降噪", "续航 40 小时"],
+            "targetAudience": "高频差旅用户",
+            "offer": "首发立减 100 元",
+            "tone": "理性高级",
+            "mandatoryClaims": ["支持七天无理由"],
+        },
+    )
+    client = FakeJsonClient([final_script_payload(version="high_quality")])
+
+    MigratorService(repository, client=client).generate("proj-1", style="high_quality")
+
+    assert "静谧 Pro 耳机" in client.prompts[0]
+    assert "首发立减 100 元" in client.prompts[0]
+    assert "legacy description" not in client.prompts[0]
 
 
 def test_migrator_requires_product_information(tmp_path: Path) -> None:
@@ -151,6 +214,42 @@ def test_migrate_routes_generate_variants_and_read_saved_script(tmp_path: Path) 
     assert saved.status_code == 200
     assert saved.json()["version"] == "high_quality"
     assert "cinematic polish" in saved.json()["segments"][0]["script"]
+
+
+def test_migrate_versions_return_baseline_and_only_generated_variants(tmp_path: Path) -> None:
+    repository = seeded_repository(tmp_path, description="A premium headphone launch for remote workers")
+    app = FastAPI()
+    app.include_router(
+        build_migrate_router(
+            repository,
+            client=FakeJsonClient([final_script_payload(version="high_click")]),
+        )
+    )
+    client = TestClient(app)
+
+    client.post("/api/v1/migrate/proj-1", json={"style": "high_click"})
+    response = client.get("/api/v1/migrate/proj-1/versions")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["evaluationLabel"] == "结构规则评估"
+    assert payload["baseline"]["id"] == "original"
+    assert [version["id"] for version in payload["versions"]] == ["high_click"]
+    assert payload["versions"][0]["timeline"][0]["source"] == "packaging"
+    assert set(payload["versions"][0]["metrics"]) == {
+        "scoreDelta",
+        "materialCoverage",
+        "productExposure",
+        "gapCount",
+        "ctaDuration",
+    }
+    assert payload["versions"][0]["metrics"]["materialCoverage"] == {
+        "before": "100%",
+        "after": "100%",
+        "delta": "+0%",
+        "positive": True,
+    }
+    assert payload["versions"][0]["metrics"]["productExposure"]["before"] == "8.0s"
 
 
 def test_migrate_routes_return_404_and_422(tmp_path: Path) -> None:

@@ -8,9 +8,10 @@ from pydantic import ValidationError
 
 from config import Settings
 from models.repository import SQLiteRepository
-from models.schemas import FinalScript, FinalScriptStyle, VideoStructure
+from models.schemas import FinalScript, FinalScriptStyle, ResultEvaluation, ResultVersionsResponse, VideoStructure
 from services.gap_detector import GapDetector
 from services.llm_structure import DoubaoSeedClient, JsonCompletionClient, StructureExtractionError
+from services.result_evaluator import ResultEvaluator
 
 
 STYLE_INSTRUCTIONS: dict[str, str] = {
@@ -46,6 +47,7 @@ class MigratorService:
         self.settings = settings or Settings()
         self.client = client or DoubaoSeedClient(self.settings)
         self.gap_detector = GapDetector(repository)
+        self.evaluator = ResultEvaluator()
 
     def generate(self, project_id: str, style: FinalScriptStyle = "default") -> FinalScript:
         project = self.repository.get_project(project_id)
@@ -78,6 +80,7 @@ class MigratorService:
         }
         script = self._generate_with_retries(prompt_context, style, structure, assets, warnings)
         self.repository.save_project_script(project_id, script)
+        self.repository.save_script_version(project_id, script, self.evaluator.evaluate_script(script))
         return script
 
     def get_saved_script(self, project_id: str) -> FinalScript | None:
@@ -85,6 +88,28 @@ class MigratorService:
             raise MigrationNotFoundError(f"Project not found: {project_id}")
         script = self.repository.get_project_script(project_id)
         return FinalScript.model_validate(script) if script else None
+
+    def get_versions(self, project_id: str) -> ResultVersionsResponse:
+        project = self.repository.get_project(project_id)
+        if project is None:
+            raise MigrationNotFoundError(f"Project not found: {project_id}")
+        baseline_payload = project.get("analysis_result") or project.get("current_structure")
+        if not baseline_payload:
+            raise MigrationInputError("项目结构未初始化")
+        baseline_structure = VideoStructure.model_validate(baseline_payload)
+        baseline_evaluation = self.evaluator.evaluate_baseline(baseline_structure)
+        return ResultVersionsResponse(
+            evaluationLabel="结构规则评估",
+            baseline=self.evaluator.baseline_version(baseline_structure),
+            versions=[
+                self.evaluator.script_version(
+                    FinalScript.model_validate(saved["script"]),
+                    baseline_evaluation,
+                    ResultEvaluation.model_validate(saved["evaluation"]),
+                )
+                for saved in self.repository.list_script_versions(project_id)
+            ],
+        )
 
     def _generate_with_retries(
         self,
@@ -117,7 +142,11 @@ class MigratorService:
         )
 
 
-def _product_info(project: dict[str, Any]) -> tuple[str, list[str]]:
+def _product_info(project: dict[str, Any]) -> tuple[str | dict[str, Any], list[str]]:
+    brief = project.get("brief") or {}
+    if str(brief.get("productName") or "").strip() or list(brief.get("sellingPoints") or []):
+        return brief, []
+
     description = str(project.get("description") or "").strip()
     if len("".join(description.split())) >= 10:
         return description, []
@@ -196,14 +225,25 @@ def _normalize_script(
         if delta > 0.10:
             raise ValueError("FinalScript total_duration differs from structure duration by more than 10%")
 
-    valid_asset_ids = {asset["id"] for asset in assets}
+    asset_by_id = {asset["id"]: asset for asset in assets}
+    baseline_positions = {segment.id: index for index, segment in enumerate(structure.script)}
     payload = script.model_dump(mode="json")
     warnings = list(base_warnings)
-    for segment in payload["segments"]:
+    for index, segment in enumerate(payload["segments"]):
         asset_id = segment.get("asset_id")
-        if asset_id and asset_id not in valid_asset_ids:
+        if asset_id and asset_id not in asset_by_id:
             warnings.append(f"asset_id {asset_id} 不存在，已置为空")
             segment["asset_id"] = None
+            asset_id = None
+        if asset_id:
+            origin = asset_by_id[asset_id].get("origin") or "uploaded"
+            if origin == "uploaded":
+                segment["source"] = "reorder" if baseline_positions.get(segment["id"]) != index else "original"
+            else:
+                segment["source"] = origin
+        else:
+            segment["source"] = "packaging"
+            warnings.append(f"segment {segment['id']} 无绑定素材，渲染将使用可见包装占位卡")
 
     metadata = dict(payload.get("metadata") or {})
     existing_warnings = metadata.get("warnings") or []

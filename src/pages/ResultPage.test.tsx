@@ -22,9 +22,43 @@ const finalScript = {
       subtitle_style: 'clean_caption',
       transition: 'hard_cut',
       locked: false,
+      source: 'packaging',
     },
   ],
   metadata: { warnings: [] },
+};
+const evaluatedVersions = {
+  evaluationLabel: '\u7ed3\u6784\u89c4\u5219\u8bc4\u4f30',
+  baseline: {
+    id: 'original',
+    name: '\u6837\u4f8b\u57fa\u7ebf',
+    score: 66,
+    metrics: {
+      scoreDelta: 0,
+      materialCoverage: { before: '100%', after: '100%', delta: '0%', positive: true },
+      productExposure: { before: '8.0s', after: '8.0s', delta: '0.0s', positive: true },
+      gapCount: { before: '0', after: '0', delta: '0', positive: true },
+      ctaDuration: { before: '11.0s', after: '11.0s', delta: '0.0s', positive: true },
+    },
+    health: { hook_strength: 80, product_exposure_timing: 50, selling_point_proof: 50, pacing_compactness: 70, cta_persuasiveness: 80, overall: 66 },
+    timeline: [{ id: 'seg-1', label: 'Hook', start: 0, end: 3, source: 'original' }],
+  },
+  versions: [
+    {
+      id: 'high_click',
+      name: '\u9ad8\u70b9\u51fb\u7248',
+      score: 71,
+      metrics: {
+        scoreDelta: 5,
+        materialCoverage: { before: '100%', after: '100%', delta: '+0%', positive: true },
+        productExposure: { before: '8.0s', after: '7.0s', delta: '-1.0s', positive: true },
+        gapCount: { before: '0', after: '0', delta: '0', positive: true },
+        ctaDuration: { before: '11.0s', after: '11.0s', delta: '+0.0s', positive: true },
+      },
+      health: { hook_strength: 100, product_exposure_timing: 55, selling_point_proof: 50, pacing_compactness: 70, cta_persuasiveness: 80, overall: 71 },
+      timeline: [{ id: 'seg-1', label: 'Generated hook', start: 0, end: 3, source: 'packaging' }],
+    },
+  ],
 };
 
 function renderRoute(path: string) {
@@ -45,7 +79,7 @@ describe('ResultPage', () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it('switches result versions', async () => {
+  it('loads only rule-evaluated generated versions from the API', async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(
         new Response(JSON.stringify([project]), {
@@ -58,11 +92,64 @@ describe('ResultPage', () => {
           status: 404,
           headers: { 'Content-Type': 'application/json' },
         }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(evaluatedVersions), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+    renderRoute('/result/proj-1');
+
+    expect(await screen.findByText(/\u7ed3\u6784\u89c4\u5219\u8bc4\u4f30/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /\u9ad8\u70b9\u51fb\u7248/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Strong Hook/ })).not.toBeInTheDocument();
+  });
+
+  it('switches evaluated result versions', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([project]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ detail: 'Final script not found' }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(evaluatedVersions), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
       );
     const user = userEvent.setup();
     renderRoute('/result/proj-1');
-    await user.click(await screen.findByRole('button', { name: /Strong Hook/ }));
-    expect(screen.getByText(/\+29/)).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: /\u9ad8\u70b9\u51fb\u7248/ }));
+    expect(screen.getByText(/\+5/)).toBeInTheDocument();
+    expect(screen.getByText(/8\.0s.*7\.0s/)).toBeInTheDocument();
+  });
+
+  it('formats negative structure score changes without a misleading plus prefix', async () => {
+    const decreasedVersions = {
+      ...evaluatedVersions,
+      versions: [{ ...evaluatedVersions.versions[0], score: 62, metrics: { ...evaluatedVersions.versions[0].metrics, scoreDelta: -4 } }],
+    };
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify([project]), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(finalScript), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(decreasedVersions), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const user = userEvent.setup();
+
+    renderRoute('/result/proj-1');
+    await user.click(await screen.findByRole('button', { name: /\u9ad8\u70b9\u51fb\u7248/ }));
+
+    expect(screen.getByText('-4')).toBeInTheDocument();
+    expect(screen.queryByText('+-4')).not.toBeInTheDocument();
   });
 
   it('renders generated final script timeline when one is available', async () => {
@@ -78,11 +165,58 @@ describe('ResultPage', () => {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(evaluatedVersions), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
       );
 
     renderRoute('/result/proj-1');
 
     expect(await screen.findByText('Generated hook')).toBeInTheDocument();
+  });
+
+  it('shows service-derived source for generated timeline segments', async () => {
+    const recomposedScript = {
+      ...finalScript,
+      segments: [{ ...finalScript.segments[0], asset_id: 'asset-video', source: 'recompose' }],
+    };
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([project]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(recomposedScript), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            ...evaluatedVersions,
+            versions: [
+              {
+                ...evaluatedVersions.versions[0],
+                timeline: [{ id: 'seg-1', label: 'Generated hook', start: 0, end: 3, source: 'recompose' }],
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      );
+
+    renderRoute('/result/proj-1');
+
+    expect((await screen.findAllByText('\u7d20\u6750\u91cd\u7ec4')).length).toBeGreaterThan(0);
   });
 
   it('starts a render job from the export dialog and passes the output to the player', async () => {
@@ -95,6 +229,12 @@ describe('ResultPage', () => {
       )
       .mockResolvedValueOnce(
         new Response(JSON.stringify(finalScript), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(evaluatedVersions), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         }),

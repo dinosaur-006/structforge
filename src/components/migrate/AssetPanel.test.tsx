@@ -13,6 +13,9 @@ const assets: Asset[] = [
     matchStatus: 'matched',
     matchScore: 91,
     color: '#5C8B67',
+    origin: 'uploaded',
+    recommendedSegments: [{ segmentId: 'seg-cta', label: 'CTA', score: 91 }],
+    reason: '适合 CTA：优惠信息与购买行动匹配',
   },
 ];
 
@@ -24,6 +27,7 @@ describe('AssetPanel', () => {
 
     expect(screen.getByText('offer.txt')).toBeInTheDocument();
     expect(screen.getByText('优惠购买')).toBeInTheDocument();
+    expect(screen.getByText(/适合 CTA/)).toBeInTheDocument();
 
     const input = screen.getByLabelText('上传素材');
     const file = new File(['优惠购买'], 'offer.txt', { type: 'text/plain' });

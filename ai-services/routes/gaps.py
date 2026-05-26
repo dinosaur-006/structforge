@@ -15,7 +15,7 @@ from services.structure_editor import StructureNotFoundError
 
 def build_gaps_router(repository: SQLiteRepository, settings: Settings) -> APIRouter:
     router = APIRouter(prefix="/api/v1/gaps", tags=["gaps"])
-    detector = GapDetector(repository)
+    detector = GapDetector(repository, settings)
     filler = GapFiller(repository, settings)
 
     @router.get("/{project_id}", response_model=GapListResponse)

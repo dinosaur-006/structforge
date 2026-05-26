@@ -18,6 +18,9 @@ const textAsset = {
   matchStatus: 'matched' as const,
   matchScore: 91,
   color: '#5C8B67',
+  origin: 'uploaded' as const,
+  recommendedSegments: [{ segmentId: 'seg-3', label: 'CTA', score: 91 }],
+  reason: '适合 CTA：优惠购买与该结构槽位需求匹配',
 };
 
 const openGap = {
@@ -29,7 +32,7 @@ const openGap = {
   selectedStrategyId: 'packaging',
   recommendedStrategy: 'packaging',
   status: 'open' as const,
-  strategies: [{ id: 'packaging', name: '包装补全', description: '生成包装图' }],
+  strategies: [{ id: 'packaging', name: '包装补全', description: '生成包装图', available: true }],
 };
 
 function jsonResponse(body: unknown, status = 200) {
@@ -55,6 +58,7 @@ const finalScript = {
       subtitle_style: 'clean_caption',
       transition: 'hard_cut',
       locked: false,
+      source: 'packaging' as const,
     },
   ],
   metadata: { warnings: [] as string[] },
@@ -88,6 +92,20 @@ describe('app store', () => {
     await useAppStore.getState().removeProject(id);
     expect(useAppStore.getState().projects.some((project) => project.id === id)).toBe(false);
     expect(fetch).toHaveBeenCalledWith('http://127.0.0.1:8000/api/v1/projects', expect.objectContaining({ method: 'POST' }));
+  });
+
+  it('updates a project creative brief through the API', async () => {
+    const brief = { productName: 'Quiet Pro', sellingPoints: ['降噪'], targetAudience: '通勤人士', offer: '299 元', tone: '专业', mandatoryClaims: [] };
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ ...project, brief }));
+    useAppStore.setState({ projects: [project] });
+
+    await useAppStore.getState().updateProjectBrief('proj-1', brief);
+
+    expect(useAppStore.getState().projects[0].brief).toEqual(brief);
+    expect(fetch).toHaveBeenCalledWith(
+      'http://127.0.0.1:8000/api/v1/projects/proj-1',
+      expect.objectContaining({ method: 'PUT' }),
+    );
   });
 
   it('loads structure, updates a segment, and supports undo redo through the API', async () => {

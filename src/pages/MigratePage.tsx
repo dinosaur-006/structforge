@@ -2,6 +2,7 @@ import { Redo2, RotateCcw, Save, Undo2, WandSparkles } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AssetPanel } from '../components/migrate/AssetPanel';
+import { CreativeBriefPanel } from '../components/migrate/CreativeBriefPanel';
 import { GapPanel } from '../components/migrate/GapPanel';
 import { SegmentDrawer } from '../components/migrate/SegmentDrawer';
 import { TimelineEditor } from '../components/migrate/TimelineEditor';
@@ -47,6 +48,7 @@ export default function MigratePage() {
   const addToast = useAppStore((state) => state.addToast);
   const removeSelectedSegment = useAppStore((state) => state.removeSelectedSegment);
   const uploadAsset = useAppStore((state) => state.uploadAsset);
+  const updateProjectBrief = useAppStore((state) => state.updateProjectBrief);
   const migrateScript = useAppStore((state) => state.migrateScript);
   const scriptLoading = useAppStore((state) => state.scriptLoading);
 
@@ -116,6 +118,8 @@ export default function MigratePage() {
           </div>
         }
       />
+
+      <CreativeBriefPanel brief={project?.brief} onSave={(brief) => updateProjectBrief(projectId, brief)} />
 
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card p-3 shadow-sm">
         <div className="flex flex-wrap gap-2">

@@ -1,13 +1,17 @@
 import type {
+  AnalysisSample,
   Asset,
+  Capabilities,
   FinalScript,
   FinalScriptStyle,
   MaterialGap,
   MatchStatus,
   Project,
+  ProjectBrief,
   RenderResolution,
   RenderStatus,
   RenderVersion,
+  ResultVersionsResponse,
   ScriptSegment,
   VideoStructure,
 } from '../shared/types';
@@ -113,10 +117,13 @@ async function extractErrorMessage(response: Response): Promise<string> {
 }
 
 export const api = {
+  getCapabilities: () => request<Capabilities>('/api/v1/capabilities'),
   listProjects: () => request<Project[]>('/api/v1/projects'),
-  createProject: (payload: { name: string; description: string }) =>
+  createProject: (payload: { name: string; description: string; brief?: ProjectBrief }) =>
     request<Project>('/api/v1/projects', { method: 'POST', body: JSON.stringify(payload) }),
   getProject: (projectId: string) => request<Project>(`/api/v1/projects/${projectId}`),
+  updateProject: (projectId: string, payload: { name?: string; description?: string; brief?: ProjectBrief }) =>
+    request<Project>(`/api/v1/projects/${projectId}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deleteProject: (projectId: string) => request<void>(`/api/v1/projects/${projectId}`, { method: 'DELETE' }),
   startAnalysis: (file: File, projectId?: string) => {
     const form = new FormData();
@@ -125,6 +132,9 @@ export const api = {
     return request<AnalysisJob>('/api/v1/analyze', { method: 'POST', body: form });
   },
   getAnalysis: (jobId: string) => request<AnalysisStatus>(`/api/v1/analyze/${jobId}`),
+  listAnalysisSamples: (projectId: string) => request<AnalysisSample[]>(`/api/v1/analyze/project/${projectId}/samples`),
+  selectAnalysisReference: (projectId: string, jobId: string) =>
+    request<AnalysisSample>(`/api/v1/analyze/project/${projectId}/reference/${jobId}`, { method: 'PUT' }),
   analyzeAsset: (projectId: string, file: File) => {
     const form = new FormData();
     form.append('file', file);
@@ -141,8 +151,12 @@ export const api = {
   migrateVariant: (projectId: string, style: Exclude<FinalScriptStyle, 'default'>) =>
     request<FinalScript>(`/api/v1/migrate/${projectId}/variant`, { method: 'POST', body: JSON.stringify({ style }) }),
   getFinalScript: (projectId: string) => request<FinalScript>(`/api/v1/migrate/${projectId}`),
-  startRender: (projectId: string, version: RenderVersion, resolution: RenderResolution = '1080p') =>
-    request<RenderJobResponse>(`/api/v1/render/${projectId}`, { method: 'POST', body: JSON.stringify({ version, resolution }) }),
+  getResultVersions: (projectId: string) => request<ResultVersionsResponse>(`/api/v1/migrate/${projectId}/versions`),
+  startRender: (projectId: string, version: RenderVersion, resolution: RenderResolution = '1080p', scriptVersion?: FinalScriptStyle) =>
+    request<RenderJobResponse>(`/api/v1/render/${projectId}`, {
+      method: 'POST',
+      body: JSON.stringify({ version, resolution, ...(scriptVersion ? { script_version: scriptVersion } : {}) }),
+    }),
   getRenderJob: (jobId: string) => request<RenderProgressResponse>(`/api/v1/render/${jobId}`),
   getStructure: (projectId: string) => request<VideoStructure>(`/api/v1/structure/${projectId}`),
   replaceStructure: (projectId: string, structure: VideoStructure) =>

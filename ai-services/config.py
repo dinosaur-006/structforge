@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 500 * 1024 * 1024
     ffmpeg_path: str = "ffmpeg"
     ffprobe_path: str = "ffprobe"
+    packaging_font_path: Path | None = None
     scene_threshold: float = 27.0
     max_keyframes: int = 60
 
@@ -41,6 +42,8 @@ class Settings(BaseSettings):
     doubao_llm_endpoint: str | None = None
     doubao_llm_api_key: str | None = None
     doubao_llm_model: str = "doubao-seed-2-0-lite"
+    jimeng_image_endpoint: str | None = None
+    jimeng_image_api_key: str | None = None
     llm_max_attempts: int = Field(default=3, ge=1, le=10)
 
 

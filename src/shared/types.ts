@@ -2,19 +2,31 @@ export type ProjectStatus = 'draft' | 'analyzing' | 'editing' | 'rendering' | 'c
 export type SegmentType = 'hook' | 'pain' | 'product' | 'proof' | 'cta';
 export type AssetType = 'image' | 'video' | 'text';
 export type MatchStatus = 'matched' | 'partial' | 'unmatched';
+export type AssetOrigin = 'uploaded' | 'packaging' | 'aigc' | 'recompose';
 export type HealthTone = 'success' | 'warning' | 'error';
 export type GapSeverity = 'critical' | 'warning';
 export type GapStatus = 'open' | 'fixed';
-export type SourceType = 'original' | 'reorder' | 'aigc' | 'packaging';
+export type SourceType = 'original' | 'reorder' | 'aigc' | 'packaging' | 'recompose';
 export type FinalScriptStyle = 'high_click' | 'high_conversion' | 'fast_pace' | 'high_quality' | 'default';
 export type RenderVersion = 'original' | 'safe_fix' | 'strong_hook' | 'strong_conversion';
 export type RenderStatus = 'idle' | 'pending' | 'processing' | 'completed' | 'failed';
 export type RenderResolution = '720p' | '1080p';
+export type CapabilityState = 'configured' | 'fallback' | 'disabled' | 'inline' | 'worker';
+
+export interface ProjectBrief {
+  productName: string;
+  sellingPoints: string[];
+  targetAudience: string;
+  offer: string;
+  tone: string;
+  mandatoryClaims: string[];
+}
 
 export interface Project {
   id: string;
   name: string;
   description: string;
+  brief?: ProjectBrief;
   status: ProjectStatus;
   updatedAt: string;
   thumbnail?: string;
@@ -75,6 +87,29 @@ export interface VideoStructure {
   health: HealthScores;
 }
 
+export interface AnalysisSample {
+  job_id: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  progress: number;
+  stage: string;
+  result?: VideoStructure | null;
+  isReference: boolean;
+}
+
+export interface CapabilityItem {
+  state: CapabilityState;
+  label: string;
+  detail: string;
+}
+
+export interface Capabilities {
+  llm: CapabilityItem;
+  vision: CapabilityItem;
+  asr: CapabilityItem;
+  aigc: CapabilityItem;
+  taskExecution: CapabilityItem;
+}
+
 export interface Asset {
   id: string;
   name: string;
@@ -83,12 +118,17 @@ export interface Asset {
   matchStatus: MatchStatus;
   matchScore: number;
   color: string;
+  origin: AssetOrigin;
+  recommendedSegments: Array<{ segmentId: string; label: string; score: number }>;
+  reason: string;
 }
 
 export interface GapStrategy {
   id: string;
   name: string;
   description: string;
+  available: boolean;
+  unavailableReason?: string;
 }
 
 export interface MaterialGap {
@@ -123,6 +163,7 @@ export interface FinalSegment {
   subtitle_style: string;
   transition: string;
   locked: boolean;
+  source: SourceType;
 }
 
 export interface FinalScript {
@@ -142,13 +183,26 @@ export interface ResultVersion {
   score: number;
   metrics: {
     scoreDelta: number;
-    hookAdvance: string;
-    exposureAdvance: string;
-    wasteReduction: string;
-    ctaDuration: string;
+    materialCoverage: MetricComparison;
+    productExposure: MetricComparison;
+    gapCount: MetricComparison;
+    ctaDuration: MetricComparison;
   };
   health: HealthScores;
   timeline: ResultTimelineSegment[];
+}
+
+export interface MetricComparison {
+  before: string;
+  after: string;
+  delta: string;
+  positive: boolean;
+}
+
+export interface ResultVersionsResponse {
+  evaluationLabel: string;
+  baseline: ResultVersion;
+  versions: ResultVersion[];
 }
 
 export interface ToastMessage {

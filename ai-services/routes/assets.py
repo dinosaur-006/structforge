@@ -39,7 +39,11 @@ def build_assets_router(repository: SQLiteRepository, settings: Settings) -> API
     async def list_assets(project_id: str) -> list[dict[str, Any]]:
         if repository.get_project(project_id) is None:
             raise HTTPException(status_code=404, detail="Project not found")
-        return [_to_asset_out(asset) for asset in repository.list_assets(project_id)]
+        try:
+            recommendations = matcher.recommend_project_assets(project_id)
+        except StructureNotFoundError:
+            recommendations = {}
+        return [_to_asset_out(asset, recommendations.get(asset["id"])) for asset in repository.list_assets(project_id)]
 
     @router.get("/{project_id}/match", response_model=AssetMatchResponse)
     async def match_assets(project_id: str) -> dict[str, Any]:
@@ -52,7 +56,11 @@ def build_assets_router(repository: SQLiteRepository, settings: Settings) -> API
     return router
 
 
-def _to_asset_out(asset: dict[str, Any]) -> dict[str, Any]:
+def _to_asset_out(asset: dict[str, Any], recommendation: dict[str, Any] | None = None) -> dict[str, Any]:
+    explanation = recommendation or {
+        "recommendedSegments": [],
+        "reason": "等待结构初始化后生成匹配推荐",
+    }
     return {
         "id": asset["id"],
         "name": asset["name"],
@@ -61,6 +69,8 @@ def _to_asset_out(asset: dict[str, Any]) -> dict[str, Any]:
         "matchStatus": asset.get("match_status") or "unmatched",
         "matchScore": float(asset.get("match_score") or 0),
         "color": _color_for_label(asset.get("tag") or asset["name"]),
+        "origin": asset.get("origin") or "uploaded",
+        **explanation,
     }
 
 

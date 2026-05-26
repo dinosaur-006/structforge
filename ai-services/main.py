@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import importlib.util
+
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from config import Settings
 from models.repository import SQLiteRepository
-from models.schemas import AnalyzeResponse, TaskProgress
+from models.schemas import AnalysisSampleOut, AnalyzeResponse, CapabilityStatusOut, TaskProgress
 from routes.assets import build_assets_router
 from routes.gaps import build_gaps_router
 from routes.migrate import build_migrate_router
@@ -52,6 +54,48 @@ def create_app() -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get(f"{API_PREFIX}/capabilities", response_model=CapabilityStatusOut)
+    async def capabilities() -> CapabilityStatusOut:
+        whisper_available = importlib.util.find_spec("whisperx") is not None
+        asr_configured = bool(settings.volcano_asr_endpoint and settings.volcano_asr_api_key)
+        return CapabilityStatusOut(
+            llm={
+                "state": "configured" if settings.doubao_llm_endpoint and settings.doubao_llm_api_key else "fallback",
+                "label": "Doubao LLM",
+                "detail": "已提供 LLM 配置；首次真实生成时验证授权可用性"
+                if settings.doubao_llm_endpoint and settings.doubao_llm_api_key
+                else "分析使用本地结构回退，脚本生成需配置模型",
+            },
+            vision={
+                "state": "configured" if settings.doubao_vision_endpoint and settings.doubao_vision_api_key else "fallback",
+                "label": "Vision",
+                "detail": "真实关键帧与素材画面理解已配置"
+                if settings.doubao_vision_endpoint and settings.doubao_vision_api_key
+                else "使用占位画面描述",
+            },
+            asr={
+                "state": "configured" if asr_configured or whisper_available else "disabled",
+                "label": "ASR",
+                "detail": "火山语音识别已配置"
+                if asr_configured
+                else "WhisperX 本地转写可用"
+                if whisper_available
+                else "未启用语音转写",
+            },
+            aigc={
+                "state": "configured" if settings.jimeng_image_endpoint and settings.jimeng_image_api_key else "disabled",
+                "label": "AIGC",
+                "detail": "即梦图片补全已配置"
+                if settings.jimeng_image_endpoint and settings.jimeng_image_api_key
+                else "未配置生成图片，补全策略不可选",
+            },
+            taskExecution={
+                "state": "inline" if settings.celery_task_always_eager else "worker",
+                "label": "Tasks",
+                "detail": "本地同步任务模式" if settings.celery_task_always_eager else "Redis / Celery 异步任务模式",
+            },
+        )
+
     @app.post(f"{API_PREFIX}/analyze", response_model=AnalyzeResponse)
     async def analyze_video(
         video: UploadFile = File(...),
@@ -94,6 +138,38 @@ def create_app() -> FastAPI:
             stage=job["stage"],
             result=job["result"],
             error=job["error"],
+        )
+
+    @app.get(f"{API_PREFIX}/analyze/project/{{project_id}}/samples", response_model=list[AnalysisSampleOut])
+    async def list_analysis_samples(project_id: str) -> list[AnalysisSampleOut]:
+        if repository.get_project(project_id) is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return [
+            AnalysisSampleOut(
+                job_id=job["job_id"],
+                status=job["status"],
+                progress=job["progress"],
+                stage=job["stage"],
+                result=job["result"],
+                isReference=job["isReference"],
+            )
+            for job in repository.list_project_jobs(project_id)
+        ]
+
+    @app.put(f"{API_PREFIX}/analyze/project/{{project_id}}/reference/{{job_id}}", response_model=AnalysisSampleOut)
+    async def select_analysis_reference(project_id: str, job_id: str) -> AnalysisSampleOut:
+        if repository.get_project(project_id) is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        job = repository.select_reference_job(project_id, job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Completed sample not found")
+        return AnalysisSampleOut(
+            job_id=job["job_id"],
+            status=job["status"],
+            progress=job["progress"],
+            stage=job["stage"],
+            result=job["result"],
+            isReference=True,
         )
 
     return app

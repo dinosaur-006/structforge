@@ -11,7 +11,7 @@ import { ErrorAlert } from '../components/ui/ErrorAlert';
 import { MetricRow } from '../components/ui/MetricRow';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { copy } from '../shared/copy';
-import type { FinalScript, RenderResolution, RenderVersion, ResultTimelineSegment } from '../shared/types';
+import type { FinalScriptStyle, RenderResolution, RenderVersion } from '../shared/types';
 import { useAppStore } from '../store';
 
 const scriptVersionLabel: Record<string, string> = {
@@ -24,9 +24,11 @@ const scriptVersionLabel: Record<string, string> = {
 
 const renderVersionMap: Record<string, RenderVersion> = {
   original: 'original',
-  'safe-fix': 'safe_fix',
-  'strong-hook': 'strong_hook',
-  'strong-conversion': 'strong_conversion',
+  default: 'original',
+  high_click: 'strong_hook',
+  high_conversion: 'strong_conversion',
+  fast_pace: 'safe_fix',
+  high_quality: 'original',
 };
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://127.0.0.1:8000';
@@ -38,10 +40,12 @@ export default function ResultPage() {
   const [projectsChecked, setProjectsChecked] = useState(false);
   const fetchProjects = useAppStore((state) => state.fetchProjects);
   const loadFinalScript = useAppStore((state) => state.loadFinalScript);
+  const fetchResultVersions = useAppStore((state) => state.fetchResultVersions);
   const findProject = useAppStore((state) => state.findProject);
   const project = findProject(projectId);
   const currentScript = useAppStore((state) => state.currentScript);
   const versions = useAppStore((state) => state.versions);
+  const evaluationLabel = useAppStore((state) => state.evaluationLabel);
   const currentVersionId = useAppStore((state) => state.currentVersionId);
   const setVersion = useAppStore((state) => state.setVersion);
   const isExporting = useAppStore((state) => state.isExporting);
@@ -50,32 +54,35 @@ export default function ResultPage() {
   const startRender = useAppStore((state) => state.startRender);
   const currentVersion = useMemo(() => versions.find((version) => version.id === currentVersionId) ?? versions[0], [currentVersionId, versions]);
   const original = versions[0];
-  const scriptTimeline = useMemo(() => (currentScript ? timelineFromScript(currentScript) : null), [currentScript]);
-  const activeTimeline = scriptTimeline ?? currentVersion.timeline;
-  const description = currentScript
-    ? `${project?.name ?? projectId} ${'\u00b7'} ${scriptVersionLabel[currentScript.version] ?? currentScript.version}`
-    : `${project?.name ?? projectId} ${'\u00b7'} ${currentVersion.name}`;
-  const renderedVideoUrl = outputUrl ? absoluteUrl(outputUrl) : null;
-  const defaultRenderVersion = renderVersionMap[currentVersion.id] ?? 'original';
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
       if (!useAppStore.getState().projects.length) await fetchProjects();
       await loadFinalScript(projectId);
+      await fetchResultVersions(projectId);
       if (!cancelled) setProjectsChecked(true);
     }
     void load();
     return () => {
       cancelled = true;
     };
-  }, [fetchProjects, loadFinalScript, projectId]);
+  }, [fetchProjects, fetchResultVersions, loadFinalScript, projectId]);
 
-  if (!project && !projectsChecked) return null;
+  if ((!project || !currentVersion || !original) && !projectsChecked) return null;
 
   if (!project) {
     return <ErrorAlert title={'\u9879\u76ee\u4e0d\u5b58\u5728'} description={'\u8bf7\u56de\u5230\u9879\u76ee\u5217\u8868\u9009\u62e9\u6709\u6548\u9879\u76ee'} action={<Button onClick={() => navigate('/projects')}>{'\u8fd4\u56de\u9879\u76ee\u5217\u8868'}</Button>} />;
   }
+  if (!currentVersion || !original) {
+    return <ErrorAlert title={'\u65e0\u6cd5\u52a0\u8f7d\u8bc4\u4f30\u6570\u636e'} description={'\u8bf7\u5148\u751f\u6210\u811a\u672c\u6216\u91cd\u65b0\u5c1d\u8bd5'} />;
+  }
+  const description = currentScript
+    ? `${project.name} ${'\u00b7'} ${scriptVersionLabel[currentScript.version] ?? currentScript.version}`
+    : `${project.name} ${'\u00b7'} ${currentVersion.name}`;
+  const renderedVideoUrl = outputUrl ? absoluteUrl(outputUrl) : null;
+  const defaultRenderVersion = renderVersionMap[currentVersion.id] ?? 'original';
+  const selectedScriptVersion = currentVersion.id === 'original' ? undefined : currentVersion.id as FinalScriptStyle;
 
   return (
     <section className="mx-auto max-w-[1240px] space-y-6">
@@ -91,25 +98,23 @@ export default function ResultPage() {
       />
 
       <VersionTabs versions={versions} currentId={currentVersion.id} onChange={setVersion} />
-      {!currentScript ? (
-        <div className="rounded-lg border border-border bg-card p-4 text-sm text-text-secondary shadow-sm">
-          {'\u5c1a\u672a\u751f\u6210\u6700\u7ec8\u811a\u672c\uff0c\u5f53\u524d\u663e\u793a\u6f14\u793a\u7248\u672c\u6570\u636e\u3002'}
-        </div>
-      ) : null}
+      <div className="rounded-lg border border-border bg-card px-4 py-3 text-sm text-text-secondary shadow-sm">
+        {evaluationLabel}{'\uff1a'}{currentScript ? '\u5df2\u751f\u6210\u7248\u672c\u4e0e\u6837\u4f8b\u57fa\u7ebf\u4f7f\u7528\u540c\u4e00\u89c4\u5219\u8bc4\u5206\u3002' : '\u5c1a\u672a\u751f\u6210\u65b0\u811a\u672c\uff0c\u4ec5\u663e\u793a\u6837\u4f8b\u57fa\u7ebf\u3002'}
+      </div>
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr),340px]">
-        <VideoPlayer timeline={activeTimeline} src={renderedVideoUrl} />
+        <VideoPlayer timeline={currentVersion.timeline} src={renderedVideoUrl} />
         <aside className="rounded-lg border border-border bg-card p-5 shadow-sm">
           <h2 className="font-semibold">{'\u7248\u672c\u6307\u6807'}</h2>
           <div className="mt-3">
-            <MetricRow label={'\u7ed3\u6784\u5206'} before={`${original.score}`} after={`${currentVersion.score}`} delta={`+${currentVersion.metrics.scoreDelta}`} />
-            <MetricRow label={'Hook \u63d0\u524d'} before={'0s'} after={currentVersion.metrics.hookAdvance} delta={currentVersion.metrics.hookAdvance} />
-            <MetricRow label={'\u4ea7\u54c1\u9732\u51fa'} before={'0s'} after={currentVersion.metrics.exposureAdvance} delta={currentVersion.metrics.exposureAdvance} />
-            <MetricRow label={'\u65e0\u6548\u7247\u6bb5'} before={'0%'} after={currentVersion.metrics.wasteReduction} delta={currentVersion.metrics.wasteReduction} />
-            <MetricRow label={'CTA \u5f3a\u5316'} before={'0s'} after={currentVersion.metrics.ctaDuration} delta={currentVersion.metrics.ctaDuration} />
+            <MetricRow label={'\u7ed3\u6784\u5206'} before={`${original.score}`} after={`${currentVersion.score}`} delta={signedScore(currentVersion.metrics.scoreDelta)} positive={currentVersion.metrics.scoreDelta >= 0} />
+            <MetricRow label={'\u7d20\u6750\u8986\u76d6\u7387'} {...currentVersion.metrics.materialCoverage} />
+            <MetricRow label={'\u4ea7\u54c1\u9996\u6b21\u9732\u51fa'} {...currentVersion.metrics.productExposure} />
+            <MetricRow label={'\u7f3a\u53e3\u6570\u91cf'} {...currentVersion.metrics.gapCount} />
+            <MetricRow label={'CTA \u65f6\u957f'} {...currentVersion.metrics.ctaDuration} />
           </div>
         </aside>
       </div>
-      <ResultTimeline segments={activeTimeline} onSeek={() => undefined} />
+      <ResultTimeline segments={currentVersion.timeline} onSeek={() => undefined} />
       <CompareRadar original={original.health} current={currentVersion.health} />
       <ExportDialog
         open={exportOpen}
@@ -118,20 +123,14 @@ export default function ResultPage() {
         outputUrl={renderedVideoUrl}
         defaultVersion={defaultRenderVersion}
         onClose={() => setExportOpen(false)}
-        onExport={(version: RenderVersion, resolution: RenderResolution) => void startRender(projectId, version, resolution)}
+        onExport={(version: RenderVersion, resolution: RenderResolution) => void startRender(projectId, version, resolution, selectedScriptVersion)}
       />
     </section>
   );
 }
 
-function timelineFromScript(script: FinalScript): ResultTimelineSegment[] {
-  return script.segments.map((segment) => ({
-    id: segment.id,
-    label: segment.script,
-    start: segment.start,
-    end: segment.end,
-    source: segment.asset_id ? 'original' : 'packaging',
-  }));
+function signedScore(value: number): string {
+  return value > 0 ? `+${value}` : `${value}`;
 }
 
 function absoluteUrl(path: string): string {

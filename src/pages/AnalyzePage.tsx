@@ -1,12 +1,17 @@
 import { Download, MoveRight } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AnalysisProgress } from '../components/analyze/AnalysisProgress';
+import { CapabilityStatusPanel } from '../components/analyze/CapabilityStatusPanel';
 import { StructureTabs } from '../components/analyze/StructureTabs';
 import { VideoInfoCard } from '../components/analyze/VideoInfoCard';
 import { VideoUploader } from '../components/analyze/VideoUploader';
+import { SampleComparison } from '../components/analyze/SampleComparison';
 import { Button } from '../components/ui/Button';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { copy } from '../shared/copy';
+import type { Capabilities } from '../shared/types';
+import { api } from '../services/api';
 import { useAppStore } from '../store';
 
 export default function AnalyzePage() {
@@ -19,14 +24,47 @@ export default function AnalyzePage() {
   const progress = useAppStore((state) => state.progress);
   const stage = useAppStore((state) => state.stage);
   const analysisResult = useAppStore((state) => state.analysisResult);
+  const analysisSamples = useAppStore((state) => state.analysisSamples);
   const activeProjectId = useAppStore((state) => state.activeProjectId);
   const startAnalysis = useAppStore((state) => state.startAnalysis);
+  const fetchAnalysisSamples = useAppStore((state) => state.fetchAnalysisSamples);
+  const selectReferenceSample = useAppStore((state) => state.selectReferenceSample);
   const addToast = useAppStore((state) => state.addToast);
+  const [selectedSamples, setSelectedSamples] = useState<File[]>([]);
+  const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getCapabilities()
+      .then((value) => {
+        if (!cancelled) setCapabilities(value);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (projectId) void fetchAnalysisSamples(projectId);
+  }, [fetchAnalysisSamples, projectId]);
 
   const goNext = () => {
     const targetProjectId = activeProjectId ?? projectId;
     if (!targetProjectId) return;
     navigate(`/migrate/${targetProjectId}`);
+  };
+
+  const runSelectedAnalysis = async () => {
+    const files = selectedSamples.length ? selectedSamples : videoFile ? [videoFile] : [];
+    let targetProjectId = activeProjectId ?? projectId;
+    for (const file of files) {
+      setVideoFile(file);
+      const completedProjectId = await startAnalysis(targetProjectId);
+      if (!completedProjectId) return;
+      targetProjectId = completedProjectId;
+    }
+    setSelectedSamples([]);
   };
 
   return (
@@ -48,8 +86,19 @@ export default function AnalyzePage() {
         }
       />
 
-      <VideoUploader file={videoFile} onFile={setVideoFile} onStart={() => void startAnalysis(projectId)} disabled={isAnalyzing} />
+      {capabilities ? <CapabilityStatusPanel capabilities={capabilities} /> : null}
+      <VideoUploader
+        file={videoFile}
+        fileCount={selectedSamples.length || (videoFile ? 1 : 0)}
+        onFile={setVideoFile}
+        onFiles={setSelectedSamples}
+        onStart={() => void runSelectedAnalysis()}
+        disabled={isAnalyzing}
+      />
       {isAnalyzing ? <AnalysisProgress progress={progress} stage={stage} /> : null}
+      {analysisSamples.length ? (
+        <SampleComparison samples={analysisSamples} onSelect={(jobId) => void selectReferenceSample(activeProjectId ?? projectId ?? '', jobId)} />
+      ) : null}
       {analysisResult ? (
         <div className="space-y-5">
           <VideoInfoCard structure={analysisResult} />
