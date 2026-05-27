@@ -260,4 +260,23 @@ describe('ResultPage', () => {
     expect(await screen.findByTestId('rendered-video')).toHaveAttribute('src', 'http://127.0.0.1:8000/outputs/proj-1/original.mp4');
     expect(screen.getByRole('link', { name: /\u4e0b\u8f7d\u89c6\u9891/ })).toHaveAttribute('href', 'http://127.0.0.1:8000/outputs/proj-1/original.mp4');
   });
+
+  it('offers only implemented script exports and downloads them locally', async () => {
+    const createObjectURL = vi.fn(() => 'blob:script');
+    vi.stubGlobal('URL', { createObjectURL, revokeObjectURL: vi.fn() });
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify([project]), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(finalScript), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(evaluatedVersions), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const user = userEvent.setup();
+
+    renderRoute('/result/proj-1');
+    await user.click(await screen.findByRole('button', { name: /\u5bfc\u51fa\u89c6\u9891/ }));
+
+    expect(screen.queryByText(/PDF/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /\u4e0b\u8f7d\u811a\u672c JSON/ }));
+    await user.click(screen.getByRole('button', { name: /\u4e0b\u8f7d\u5b57\u5e55 SRT/ }));
+    expect(createObjectURL).toHaveBeenCalledTimes(2);
+  });
 });

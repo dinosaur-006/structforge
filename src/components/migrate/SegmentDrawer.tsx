@@ -104,10 +104,6 @@ export function SegmentDrawer({ open, segment, assets, onClose, onApply }: Segme
           </select>
         </label>
         <label className="flex items-center gap-3 text-sm font-semibold">
-          <input type="checkbox" checked={Boolean(activeForm.beatAligned)} onChange={(event) => update('beatAligned', event.target.checked)} />
-          {'BGM \u8282\u62cd\u5bf9\u9f50'}
-        </label>
-        <label className="flex items-center gap-3 text-sm font-semibold">
           <input type="checkbox" checked={Boolean(activeForm.locked)} onChange={(event) => update('locked', event.target.checked)} />
           {'\u9501\u5b9a\u6b64\u5206\u955c'}
         </label>

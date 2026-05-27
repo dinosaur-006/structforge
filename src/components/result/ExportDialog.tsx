@@ -1,19 +1,22 @@
 import { useState } from 'react';
 import { Button } from '../ui/Button';
 import { Modal } from '../ui/Modal';
-import type { RenderResolution, RenderVersion } from '../../shared/types';
+import type { FinalScript, RenderResolution, RenderVersion } from '../../shared/types';
 
 interface ExportDialogProps {
   open: boolean;
   isExporting: boolean;
   progress: number;
   outputUrl: string | null;
+  script: FinalScript | null;
   defaultVersion: RenderVersion;
   onClose: () => void;
   onExport: (version: RenderVersion, resolution: RenderResolution) => void;
+  onDownloadJson: () => void;
+  onDownloadSrt: () => void;
 }
 
-export function ExportDialog({ open, isExporting, progress, outputUrl, defaultVersion, onClose, onExport }: ExportDialogProps) {
+export function ExportDialog({ open, isExporting, progress, outputUrl, script, defaultVersion, onClose, onExport, onDownloadJson, onDownloadSrt }: ExportDialogProps) {
   const [resolution, setResolution] = useState<RenderResolution>('1080p');
   const [version, setVersion] = useState<RenderVersion>(defaultVersion);
   return (
@@ -45,12 +48,14 @@ export function ExportDialog({ open, isExporting, progress, outputUrl, defaultVe
             <option value="1080p">1080p</option>
           </select>
         </label>
-        {['SRT \u5b57\u5e55', 'PDF \u5206\u955c\u62a5\u544a', 'JSON \u7ed3\u6784\u6a21\u677f'].map((item) => (
-          <label key={item} className="flex items-center gap-3 text-sm font-semibold">
-            <input type="checkbox" defaultChecked />
-            {item}
-          </label>
-        ))}
+        <div className="rounded-lg border border-border bg-sidebar/40 p-3">
+          <p className="text-sm font-semibold">{'\u811a\u672c\u8d44\u4ea7'}</p>
+          <p className="mt-1 text-xs text-text-secondary">{'\u4e0b\u8f7d\u5f53\u524d\u5df2\u751f\u6210\u811a\u672c\u7684\u7ed3\u6784\u6570\u636e\u4e0e\u5b57\u5e55\u3002'}</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button variant="secondary" size="sm" onClick={onDownloadJson} disabled={!script}>{'\u4e0b\u8f7d\u811a\u672c JSON'}</Button>
+            <Button variant="secondary" size="sm" onClick={onDownloadSrt} disabled={!script}>{'\u4e0b\u8f7d\u5b57\u5e55 SRT'}</Button>
+          </div>
+        </div>
         {isExporting ? (
           <div className="rounded-lg border border-border bg-sidebar p-3">
             <div className="flex justify-between text-sm font-semibold">

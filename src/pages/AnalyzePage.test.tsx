@@ -104,4 +104,29 @@ describe('AnalyzePage', () => {
     expect(screen.getByText('已提供 LLM 配置；首次真实生成时验证授权可用性')).toBeInTheDocument();
     expect(screen.getByText('使用占位画面描述')).toBeInTheDocument();
   });
+
+  it('downloads the real completed analysis JSON', async () => {
+    const createObjectURL = vi.fn(() => 'blob:analysis');
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal('URL', { createObjectURL, revokeObjectURL });
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse(capabilities));
+    useAppStore.setState({
+      analysisResult: mockAnalysisResult,
+      activeProjectId: 'proj-1',
+      projects: [{ id: 'proj-1', name: '耳机新品', description: '', status: 'editing', updatedAt: '2026-05-23T00:00:00Z' }],
+    });
+    const user = userEvent.setup();
+
+    render(
+      <MemoryRouter initialEntries={['/analyze?projectId=proj-1']}>
+        <AnalyzePage />
+      </MemoryRouter>,
+    );
+    await user.click(screen.getByRole('button', { name: /\u5bfc\u51fa JSON/ }));
+
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:analysis');
+    expect(screen.queryByText(/\u6a21\u62df JSON/)).not.toBeInTheDocument();
+  });
 });

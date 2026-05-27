@@ -11,6 +11,7 @@ import { ErrorAlert } from '../components/ui/ErrorAlert';
 import { MetricRow } from '../components/ui/MetricRow';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { copy } from '../shared/copy';
+import { downloadJson, downloadText, finalScriptToSrt, safeFileStem } from '../shared/download';
 import type { FinalScriptStyle, RenderResolution, RenderVersion } from '../shared/types';
 import { useAppStore } from '../store';
 
@@ -91,7 +92,7 @@ export default function ResultPage() {
         description={description}
         action={
           <div className="flex flex-wrap gap-3">
-            <Button variant="secondary" onClick={() => setExportOpen(true)}><Download className="h-4 w-4" />{copy.exportReport}</Button>
+            <Button variant="secondary" onClick={() => setExportOpen(true)}><Download className="h-4 w-4" />{'\u5bfc\u51fa\u811a\u672c'}</Button>
             <Button variant="primary" onClick={() => setExportOpen(true)}><Download className="h-4 w-4" />{copy.exportVideo}</Button>
           </div>
         }
@@ -121,9 +122,12 @@ export default function ResultPage() {
         isExporting={isExporting}
         progress={renderProgress}
         outputUrl={renderedVideoUrl}
+        script={currentScript}
         defaultVersion={defaultRenderVersion}
         onClose={() => setExportOpen(false)}
         onExport={(version: RenderVersion, resolution: RenderResolution) => void startRender(projectId, version, resolution, selectedScriptVersion)}
+        onDownloadJson={() => currentScript && downloadJson(`${safeFileStem(project.name)}-${currentScript.version}-script.json`, currentScript)}
+        onDownloadSrt={() => currentScript && downloadText(`${safeFileStem(project.name)}-${currentScript.version}.srt`, finalScriptToSrt(currentScript), 'text/plain;charset=utf-8')}
       />
     </section>
   );

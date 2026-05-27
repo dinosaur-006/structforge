@@ -10,6 +10,7 @@ import { SampleComparison } from '../components/analyze/SampleComparison';
 import { Button } from '../components/ui/Button';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { copy } from '../shared/copy';
+import { downloadJson, safeFileStem } from '../shared/download';
 import type { Capabilities } from '../shared/types';
 import { api } from '../services/api';
 import { useAppStore } from '../store';
@@ -29,9 +30,10 @@ export default function AnalyzePage() {
   const startAnalysis = useAppStore((state) => state.startAnalysis);
   const fetchAnalysisSamples = useAppStore((state) => state.fetchAnalysisSamples);
   const selectReferenceSample = useAppStore((state) => state.selectReferenceSample);
-  const addToast = useAppStore((state) => state.addToast);
+  const findProject = useAppStore((state) => state.findProject);
   const [selectedSamples, setSelectedSamples] = useState<File[]>([]);
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
+  const currentProject = findProject(activeProjectId ?? projectId ?? '');
 
   useEffect(() => {
     let cancelled = false;
@@ -74,7 +76,11 @@ export default function AnalyzePage() {
         description={copy.analyzeSubtitle}
         action={
           <div className="flex flex-wrap gap-3">
-            <Button variant="secondary" onClick={() => addToast({ tone: 'info', title: copy.exportJson, description: '\u5df2\u751f\u6210\u6a21\u62df JSON' })}>
+            <Button
+              variant="secondary"
+              disabled={!analysisResult}
+              onClick={() => analysisResult && downloadJson(`${safeFileStem(currentProject?.name ?? 'structforge')}-analysis.json`, analysisResult)}
+            >
               <Download className="h-4 w-4" />
               {copy.exportJson}
             </Button>
