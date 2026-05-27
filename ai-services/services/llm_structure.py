@@ -73,7 +73,12 @@ class DoubaoSeedClient:
             raise StructureExtractionError(
                 f"Doubao LLM transport request failed: {type(exc).__name__}"
             ) from exc
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise StructureExtractionError(
+                f"Doubao LLM request failed with HTTP {exc.response.status_code}"
+            ) from exc
         payload = response.json()
         content = _extract_content(payload)
         return _parse_json_content(content) if isinstance(content, str) else content
