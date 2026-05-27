@@ -1,4 +1,4 @@
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -48,5 +48,28 @@ describe('ProjectListPage', () => {
       'http://127.0.0.1:8000/api/v1/projects',
       expect.objectContaining({ body: expect.stringContaining('"productName":"Quiet Pro"') }),
     );
+  });
+
+  it('opens a draft project in analysis before structure exists', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify([{ id: 'proj-draft', name: 'Draft Clip', description: '', status: 'draft', updatedAt: '2026-05-23T00:00:00Z' }]),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    const user = userEvent.setup();
+
+    render(
+      <MemoryRouter initialEntries={['/projects']}>
+        <Routes>
+          <Route path="/projects" element={<ProjectListPage />} />
+          <Route path="/analyze" element={<div>Analyze target</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await user.click(await screen.findByRole('heading', { name: 'Draft Clip' }));
+
+    expect(await screen.findByText('Analyze target')).toBeInTheDocument();
   });
 });

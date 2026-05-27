@@ -6,7 +6,7 @@ import { router } from './router';
 export default function App() {
   return (
     <ErrorBoundary>
-      <RouterProvider router={router} />
+      <RouterProvider router={router} future={{ v7_startTransition: true }} />
       <Toast />
     </ErrorBoundary>
   );

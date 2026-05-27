@@ -3,10 +3,11 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ResultPage from './ResultPage';
+import type { FinalScript } from '../shared/types';
 import { useAppStore } from '../store';
 
 const project = { id: 'proj-1', name: 'Headphones', description: '', status: 'editing', updatedAt: '2026-05-23T00:00:00Z' };
-const finalScript = {
+const finalScript: FinalScript = {
   version: 'high_click',
   total_duration: 35,
   segments: [
@@ -60,6 +61,10 @@ const evaluatedVersions = {
     },
   ],
 };
+const baselineOnlyVersions = {
+  ...evaluatedVersions,
+  versions: [],
+};
 
 function renderRoute(path: string) {
   return render(
@@ -88,14 +93,14 @@ describe('ResultPage', () => {
         }),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ detail: 'Final script not found' }), {
-          status: 404,
+        new Response(JSON.stringify(evaluatedVersions), {
+          status: 200,
           headers: { 'Content-Type': 'application/json' },
         }),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify(evaluatedVersions), {
-          status: 200,
+        new Response(JSON.stringify({ detail: 'Final script not found' }), {
+          status: 404,
           headers: { 'Content-Type': 'application/json' },
         }),
       );
@@ -107,6 +112,30 @@ describe('ResultPage', () => {
     expect(screen.queryByRole('button', { name: /Strong Hook/ })).not.toBeInTheDocument();
   });
 
+  it('shows a baseline result without requesting a final script that does not exist yet', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([project]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(baselineOnlyVersions), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    useAppStore.setState({ currentScript: finalScript });
+
+    renderRoute('/result/proj-1');
+
+    expect(await screen.findByText(/\u5c1a\u672a\u751f\u6210\u65b0\u811a\u672c/)).toBeInTheDocument();
+    const requestedUrls = vi.mocked(fetch).mock.calls.map(([url]) => String(url));
+    expect(requestedUrls).toContain('http://127.0.0.1:8000/api/v1/migrate/proj-1/versions');
+    expect(requestedUrls).not.toContain('http://127.0.0.1:8000/api/v1/migrate/proj-1');
+  });
+
   it('switches evaluated result versions', async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(
@@ -116,14 +145,14 @@ describe('ResultPage', () => {
         }),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ detail: 'Final script not found' }), {
-          status: 404,
+        new Response(JSON.stringify(evaluatedVersions), {
+          status: 200,
           headers: { 'Content-Type': 'application/json' },
         }),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify(evaluatedVersions), {
-          status: 200,
+        new Response(JSON.stringify({ detail: 'Final script not found' }), {
+          status: 404,
           headers: { 'Content-Type': 'application/json' },
         }),
       );
@@ -141,8 +170,8 @@ describe('ResultPage', () => {
     };
     vi.mocked(fetch)
       .mockResolvedValueOnce(new Response(JSON.stringify([project]), { status: 200, headers: { 'Content-Type': 'application/json' } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(finalScript), { status: 200, headers: { 'Content-Type': 'application/json' } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(decreasedVersions), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      .mockResolvedValueOnce(new Response(JSON.stringify(decreasedVersions), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(finalScript), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     const user = userEvent.setup();
 
     renderRoute('/result/proj-1');
@@ -161,13 +190,13 @@ describe('ResultPage', () => {
         }),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify(finalScript), {
+        new Response(JSON.stringify(evaluatedVersions), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         }),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify(evaluatedVersions), {
+        new Response(JSON.stringify(finalScript), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         }),
@@ -191,12 +220,6 @@ describe('ResultPage', () => {
         }),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify(recomposedScript), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
-      )
-      .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
             ...evaluatedVersions,
@@ -213,6 +236,12 @@ describe('ResultPage', () => {
           },
         ),
       );
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify(recomposedScript), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
 
     renderRoute('/result/proj-1');
 
@@ -228,13 +257,13 @@ describe('ResultPage', () => {
         }),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify(finalScript), {
+        new Response(JSON.stringify(evaluatedVersions), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         }),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify(evaluatedVersions), {
+        new Response(JSON.stringify(finalScript), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         }),
@@ -267,8 +296,8 @@ describe('ResultPage', () => {
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
     vi.mocked(fetch)
       .mockResolvedValueOnce(new Response(JSON.stringify([project]), { status: 200, headers: { 'Content-Type': 'application/json' } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(finalScript), { status: 200, headers: { 'Content-Type': 'application/json' } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(evaluatedVersions), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      .mockResolvedValueOnce(new Response(JSON.stringify(evaluatedVersions), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(finalScript), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     const user = userEvent.setup();
 
     renderRoute('/result/proj-1');

@@ -57,7 +57,12 @@ export default function MigratePage() {
     async function load() {
       if (!projectId) return;
       setStructureChecked(false);
-      if (!useAppStore.getState().projects.length) await fetchProjects();
+      await fetchProjects();
+      const routedProject = useAppStore.getState().findProject(projectId);
+      if (routedProject?.status === 'draft' || routedProject?.status === 'analyzing') {
+        if (!cancelled) navigate(`/analyze?projectId=${projectId}`, { replace: true });
+        return;
+      }
       try {
         await loadProjectStructure(projectId);
       } catch {
@@ -70,7 +75,7 @@ export default function MigratePage() {
     return () => {
       cancelled = true;
     };
-  }, [fetchProjects, loadProjectStructure, projectId]);
+  }, [fetchProjects, loadProjectStructure, navigate, projectId]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {

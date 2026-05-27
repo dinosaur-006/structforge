@@ -17,6 +17,7 @@ function renderRoute(path: string) {
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/migrate/:projectId" element={<MigratePage />} />
+        <Route path="/analyze" element={<div>Analyze target</div>} />
         <Route path="/result/:projectId" element={<div>Result target</div>} />
       </Routes>
     </MemoryRouter>,
@@ -44,6 +45,17 @@ describe('MigratePage', () => {
       .mockResolvedValueOnce(jsonResponse({ detail: 'Project has no structure' }, 404));
     renderRoute('/migrate/missing');
     expect(await screen.findByText(/\u9879\u76ee\u4e0d\u5b58\u5728/)).toBeInTheDocument();
+  });
+
+  it('redirects draft projects to analysis without requesting structure', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      jsonResponse([{ id: 'proj-draft', name: 'Draft', description: '', status: 'draft', updatedAt: '2026-05-23T00:00:00Z' }]),
+    );
+
+    renderRoute('/migrate/proj-draft');
+
+    expect(await screen.findByText('Analyze target')).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it('edits a segment through the drawer', async () => {

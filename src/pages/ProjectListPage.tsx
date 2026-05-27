@@ -10,7 +10,7 @@ import { copy } from '../shared/copy';
 import { formatRelativeTime } from '../shared/format';
 import { projectStatusMeta } from '../shared/status';
 import { useAppStore } from '../store';
-import type { ProjectBrief } from '../shared/types';
+import type { Project, ProjectBrief } from '../shared/types';
 
 const labels = {
   name: '\u9879\u76ee\u540d\u79f0',
@@ -104,7 +104,7 @@ export default function ProjectListPage() {
               <article
                 key={project.id}
                 className="group cursor-pointer rounded-lg border border-border bg-card p-4 shadow-sm transition-colors duration-200 hover:border-primary/40 hover:bg-sidebar/50 hover:shadow-md"
-                onClick={() => navigate(`/migrate/${project.id}`)}
+                onClick={() => navigate(projectDestination(project))}
               >
                 <div className="relative mb-4 grid aspect-video place-items-center overflow-hidden rounded-lg border border-border bg-sidebar">
                   <Video className="h-10 w-10 text-primary" />
@@ -187,6 +187,13 @@ export default function ProjectListPage() {
 
 function listFromText(value: string): string[] {
   return value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+}
+
+function projectDestination(project: Project): string {
+  if (project.status === 'draft' || project.status === 'analyzing') {
+    return `/analyze?projectId=${project.id}`;
+  }
+  return `/migrate/${project.id}`;
 }
 
 function BriefInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {

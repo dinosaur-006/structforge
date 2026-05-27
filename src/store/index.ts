@@ -515,7 +515,10 @@ export const useAppStore = create<AppState>()(
         set({ scriptLoading: true, apiError: null, activeProjectId: projectId });
         try {
           const script = await api.getFinalScript(projectId);
-          set({ currentScript: script });
+          set((state) => ({
+            currentScript: script,
+            currentVersionId: state.versions.some((version) => version.id === script.version) ? script.version : state.currentVersionId,
+          }));
         } catch (error) {
           if (error instanceof ApiError && error.status === 404) {
             set({ currentScript: null });
@@ -534,7 +537,12 @@ export const useAppStore = create<AppState>()(
           const versions = [response.baseline, ...response.versions];
           const desiredId = get().currentScript?.version ?? get().currentVersionId;
           const currentVersionId = versions.some((version) => version.id === desiredId) ? desiredId : response.baseline.id;
-          set({ versions, evaluationLabel: response.evaluationLabel, currentVersionId });
+          set({
+            versions,
+            evaluationLabel: response.evaluationLabel,
+            currentVersionId,
+            ...(response.versions.length ? {} : { currentScript: null }),
+          });
         } catch (error) {
           const message = getErrorMessage(error);
           set({ apiError: message, versions: [], evaluationLabel: '' });

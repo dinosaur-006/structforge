@@ -60,8 +60,10 @@ export default function ResultPage() {
     let cancelled = false;
     async function load() {
       if (!useAppStore.getState().projects.length) await fetchProjects();
-      await loadFinalScript(projectId);
       await fetchResultVersions(projectId);
+      if (useAppStore.getState().versions.some((version) => version.id !== 'original')) {
+        await loadFinalScript(projectId);
+      }
       if (!cancelled) setProjectsChecked(true);
     }
     void load();
