@@ -271,6 +271,15 @@ def test_render_commands_include_audio_and_conversion_extends_cta_duration(tmp_p
     )
 
 
+def test_strong_hook_zoom_filter_preserves_vertical_output_dimensions(tmp_path: Path) -> None:
+    from services.compositor import _version_filters
+
+    filters = _version_filters(720, 1280, tmp_path / "hook.ass", "strong_hook", "hook")
+
+    assert "zoompan=" in filters
+    assert "s=720x1280" in filters
+
+
 def test_real_ffmpeg_renders_visible_packaging_video_when_available(tmp_path: Path) -> None:
     from services.compositor import Compositor
 

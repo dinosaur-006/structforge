@@ -59,15 +59,20 @@ class DoubaoSeedClient:
         if not self.settings.doubao_llm_endpoint or not self.settings.doubao_llm_api_key:
             raise StructureExtractionError("Doubao LLM is not configured")
 
-        response = httpx.post(
-            self.settings.doubao_llm_endpoint,
-            headers={"Authorization": f"Bearer {self.settings.doubao_llm_api_key}"},
-            json={
-                "model": self.settings.doubao_llm_model,
-                "messages": [{"role": "user", "content": prompt}],
-            },
-            timeout=90,
-        )
+        try:
+            response = httpx.post(
+                self.settings.doubao_llm_endpoint,
+                headers={"Authorization": f"Bearer {self.settings.doubao_llm_api_key}"},
+                json={
+                    "model": self.settings.doubao_llm_model,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+                timeout=90,
+            )
+        except httpx.RequestError as exc:
+            raise StructureExtractionError(
+                f"Doubao LLM transport request failed: {type(exc).__name__}"
+            ) from exc
         response.raise_for_status()
         payload = response.json()
         content = _extract_content(payload)

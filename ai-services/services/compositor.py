@@ -302,7 +302,13 @@ def _version_filters(width: int, height: int, ass_path: Path, version: str, segm
         "setsar=1",
     ]
     if version == "strong_hook" and segment_type == "hook":
-        filters.extend(["setpts=0.77*PTS", "zoompan=z='min(zoom+0.0015,1.08)':d=1", "eq=contrast=1.12"])
+        filters.extend(
+            [
+                "setpts=0.77*PTS",
+                f"zoompan=z='min(zoom+0.0015,1.08)':d=1:s={width}x{height}:fps=30",
+                "eq=contrast=1.12",
+            ]
+        )
     if version == "strong_conversion" and segment_type == "cta":
         filters.extend(["tpad=stop_mode=clone:stop_duration=2", "drawbox=x=60:y=80:w=520:h=150:color=white@0.88:t=fill"])
     filters.append(f"subtitles='{_ffmpeg_filter_path(ass_path)}'")

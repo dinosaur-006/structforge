@@ -252,21 +252,31 @@ def render_packaging_card(
     draw.text((134, 765), label, fill=accent, font=_load_font(30, font_path))
     draw.multiline_text(
         (134, 850),
-        "\n".join(textwrap.wrap(title, width=12))[:60],
+        _fit_text_block(title, width=12, max_lines=2),
         fill="#1A1A18",
         font=_load_font(76, font_path),
         spacing=16,
     )
     draw.multiline_text(
-        (134, 1050),
-        "\n".join(textwrap.wrap(body, width=20))[:100],
+        (134, 1040),
+        _fit_text_block(body, width=20, max_lines=2),
         fill="#6B6B65",
         font=_load_font(38, font_path),
         spacing=12,
     )
-    draw.text((134, 1166), "StructForge", fill="#1A1A18", font=_load_font(28, font_path))
+    draw.text((134, 1180), "StructForge", fill="#1A1A18", font=_load_font(28, font_path))
     output_path.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(output_path, format="PNG")
+
+
+def _fit_text_block(value: str, *, width: int, max_lines: int) -> str:
+    lines = textwrap.wrap(value.strip(), width=width) or [""]
+    if len(lines) <= max_lines:
+        return "\n".join(lines)
+    selected = lines[:max_lines]
+    suffix = "..."
+    selected[-1] = selected[-1][: max(width - len(suffix), 1)].rstrip() + suffix
+    return "\n".join(selected)
 
 
 def _load_font(size: int, configured_path: Path | None) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:

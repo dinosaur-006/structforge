@@ -1,8 +1,17 @@
 from __future__ import annotations
 
+import json
+
+import httpx
 import pytest
 
-from services.llm_structure import StructureExtractionError, _parse_json_content, extract_structure_with_retries
+from config import Settings
+from services.llm_structure import (
+    DoubaoSeedClient,
+    StructureExtractionError,
+    _parse_json_content,
+    extract_structure_with_retries,
+)
 from tests.test_schemas import valid_video_structure_payload
 
 
@@ -68,3 +77,33 @@ def test_llm_extraction_normalizes_short_rhythm_series() -> None:
     )
 
     assert len(structure.rhythm) >= 5
+
+
+def test_doubao_transport_disconnect_is_retried(monkeypatch) -> None:
+    calls = 0
+    request = httpx.Request("POST", "https://unit.test/chat")
+
+    def fake_post(*args, **kwargs) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise httpx.RemoteProtocolError("Server disconnected without sending a response.", request=request)
+        return httpx.Response(
+            200,
+            request=request,
+            json={"choices": [{"message": {"content": json.dumps(valid_video_structure_payload())}}]},
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    client = DoubaoSeedClient(
+        Settings(doubao_llm_endpoint="https://unit.test/chat", doubao_llm_api_key="configured")
+    )
+
+    structure = extract_structure_with_retries(
+        client=client,
+        prompt_context={"meta": {"duration": 35}},
+        max_attempts=2,
+    )
+
+    assert calls == 2
+    assert structure.health.overall == 72

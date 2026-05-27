@@ -121,6 +121,22 @@ def test_packaging_fix_adds_asset_updates_structure_and_closes_gap(tmp_path: Pat
     assert generated[0].read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
 
 
+def test_packaging_card_text_is_limited_to_reserved_lines() -> None:
+    from services.gap_filler import _fit_text_block
+
+    title = _fit_text_block("Premium commuter headphones with extended comfort profile", width=12, max_lines=2)
+    body = _fit_text_block(
+        "Active noise cancellation with an offer designed for demanding working professionals",
+        width=20,
+        max_lines=2,
+    )
+
+    assert len(title.splitlines()) == 2
+    assert len(body.splitlines()) == 2
+    assert title.endswith("...")
+    assert body.endswith("...")
+
+
 def test_fix_all_rechecks_after_each_fix_and_closes_all_gaps(tmp_path: Path, monkeypatch) -> None:
     client = _seed_project(tmp_path, monkeypatch)
 
