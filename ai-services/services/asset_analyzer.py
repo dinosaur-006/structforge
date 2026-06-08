@@ -12,6 +12,7 @@ from fastapi import UploadFile
 from config import Settings
 from models.repository import SQLiteRepository
 from services.vision import analyze_frames
+from services.scene_classifier import SceneClassifier
 
 
 class AssetValidationError(ValueError):
@@ -27,6 +28,8 @@ SUPPORTED_TYPES = {
     "video": ("video/",),
     "text": ("text/plain",),
 }
+
+MAX_ASSET_BYTES = 50 * 1024 * 1024  # 50MB per asset
 
 
 def classify_asset_type(content_type: str | None) -> str:
@@ -55,6 +58,8 @@ class AssetAnalyzer:
         asset_type = classify_asset_type(file.content_type)
         if not content:
             raise AssetValidationError("Asset file is empty")
+        if len(content) > MAX_ASSET_BYTES:
+            raise AssetValidationError(f"Asset file exceeds {MAX_ASSET_BYTES // (1024*1024)}MB limit")
         if self.repository.get_project(project_id) is None:
             raise AssetProjectNotFoundError(f"Project not found: {project_id}")
 
@@ -79,21 +84,42 @@ class AssetAnalyzer:
 
     def _analyze_file(self, asset_type: str, stored_path: Path, content: bytes) -> dict[str, Any]:
         if asset_type == "text":
-            return _analyze_text(content, stored_path.name)
-        if asset_type == "image":
-            return _analyze_image(stored_path, self.settings)
-        return _analyze_video(stored_path, self.settings)
+            result = _analyze_text(content, stored_path.name)
+        elif asset_type == "image":
+            result = _analyze_image(stored_path, self.settings)
+        else:
+            result = _analyze_video(stored_path, self.settings)
+
+        # Classify scene type (uses LLM when available, keyword fallback otherwise).
+        classifier = SceneClassifier(
+            llm_endpoint=self.settings.doubao_llm_endpoint,
+            llm_api_key=self.settings.doubao_llm_api_key,
+            llm_model=self.settings.doubao_llm_model,
+        )
+        scene_type = classifier.classify(result)
+        if scene_type:
+            result["scene_type"] = scene_type
+            existing_tags = [str(t) for t in result.get("tags", [])]
+            tag_map = {"hook": "冲突画面", "pain": "痛点场景", "product": "产品特写", "proof": "演示证明", "cta": "优惠购买"}
+            scene_tag = tag_map.get(scene_type, "")
+            if scene_tag and scene_tag not in existing_tags:
+                existing_tags.append(scene_tag)
+            result["tags"] = existing_tags
+        return result
 
 
 def _analyze_image(path: Path, settings: Settings) -> dict[str, Any]:
     vision = analyze_frames([path], settings)
     frame = (vision.get("frames") or [{}])[0]
+    description = _description_from_name(path.name, frame.get("description"))
+    ocr_text = " ".join(frame.get("ocr") or [])
+    search_text = " ".join([path.name, description, ocr_text, *[str(tag) for tag in frame.get("tags") or []]])
     return {
         "asset_status": "analyzed",
         "analysis_type": "image",
-        "description": _description_from_name(path.name, frame.get("description")),
-        "tags": _tags_from_text(path.name, frame.get("tags") or []),
-        "ocr_text": " ".join(frame.get("ocr") or []),
+        "description": description,
+        "tags": _tags_from_text(search_text, frame.get("tags") or []),
+        "ocr_text": ocr_text,
         "vision_status": vision.get("vision_status", "completed"),
     }
 
@@ -145,7 +171,9 @@ def _analyze_text(content: bytes, filename: str) -> dict[str, Any]:
 
 
 def _description_from_name(filename: str, fallback: str | None) -> str:
-    mapped = _tags_from_text(filename, [])
+    if fallback and fallback != "Key product or scene frame awaiting visual model analysis":
+        return fallback
+    mapped = [tag for tag in _tags_from_text(filename, []) if tag != "素材"]
     if mapped:
         return "、".join(mapped)
     return fallback or f"{filename} 素材"

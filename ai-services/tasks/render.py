@@ -33,4 +33,8 @@ def dispatch_render_task(
     resolution: str,
     script_version: str | None = None,
 ) -> None:
-    render_video_task.delay(job_id, project_id, version, resolution, script_version)
+    settings = Settings()
+    if settings.celery_task_always_eager:
+        render_video_task(job_id, project_id, version, resolution, script_version)
+    else:
+        render_video_task.delay(job_id, project_id, version, resolution, script_version)

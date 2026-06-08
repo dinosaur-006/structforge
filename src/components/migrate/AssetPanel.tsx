@@ -5,21 +5,29 @@ import { Badge } from '../ui/Badge';
 import { EmptyState } from '../ui/EmptyState';
 import type { Asset } from '../../shared/types';
 
-function AssetCard({ asset }: { asset: Asset }) {
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://127.0.0.1:8000';
+
+function AssetCard({ asset, projectId }: { asset: Asset; projectId: string }) {
   const { attributes, listeners, setNodeRef, transform } = useDraggable({ id: asset.id });
   const Icon = asset.type === 'video' ? Film : asset.type === 'text' ? FileText : Image;
   const tone = asset.matchStatus === 'matched' ? 'success' : asset.matchStatus === 'partial' ? 'warning' : 'neutral';
+  const thumbnailUrl = asset.type !== 'text'
+    ? `${API_BASE_URL}/api/v1/assets/${projectId}/${asset.id}/thumbnail`
+    : null;
 
   return (
     <div
       ref={setNodeRef}
       className="rounded-lg border border-border bg-card p-3 shadow-sm transition-colors hover:border-primary/40"
-      style={{ transform: CSS.Translate.toString(transform) }}
+      style={{ transform: CSS.Transform.toString(transform) }}
       {...listeners}
       {...attributes}
     >
-      <div className="grid aspect-video place-items-center rounded-lg border border-border bg-sidebar" style={{ color: asset.color }}>
-        <Icon className="h-7 w-7" />
+      <div className="grid aspect-video place-items-center overflow-hidden rounded-lg border border-border bg-sidebar">
+        {thumbnailUrl ? (
+          <img src={thumbnailUrl} alt={asset.name} className="h-full w-full object-cover" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+        ) : null}
+        {!thumbnailUrl ? <Icon className="h-7 w-7" style={{ color: asset.color }} /> : null}
       </div>
       <div className="mt-3">
         <p className="truncate text-sm font-semibold">{asset.name}</p>
@@ -35,9 +43,10 @@ interface AssetPanelProps {
   assets: Asset[];
   assetLoading?: boolean;
   onUploadAsset?: (file: File) => Promise<void> | void;
+  projectId?: string;
 }
 
-export function AssetPanel({ assets, assetLoading = false, onUploadAsset }: AssetPanelProps) {
+export function AssetPanel({ assets, assetLoading = false, onUploadAsset, projectId = '' }: AssetPanelProps) {
   const handleUpload = (file: File | undefined) => {
     if (!file || !onUploadAsset) return;
     void onUploadAsset(file);
@@ -69,7 +78,7 @@ export function AssetPanel({ assets, assetLoading = false, onUploadAsset }: Asse
         <EmptyState icon={<Upload className="h-7 w-7" />} title={'\u6682\u65e0\u7d20\u6750'} description={'\u8bf7\u4e0a\u4f20\u4ea7\u54c1\u56fe\u6216\u89c6\u9891\u7247\u6bb5'} />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-          {assets.map((asset) => <AssetCard key={asset.id} asset={asset} />)}
+          {assets.map((asset) => <AssetCard key={asset.id} asset={asset} projectId={projectId} />)}
         </div>
       )}
     </aside>

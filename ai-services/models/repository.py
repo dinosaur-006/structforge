@@ -329,17 +329,23 @@ class SQLiteRepository:
             for row in rows
         ]
 
-    def select_reference_job(self, project_id: str, job_id: str) -> dict[str, Any] | None:
+    def select_reference_job(
+        self,
+        project_id: str,
+        job_id: str,
+        structure_override: VideoStructure | dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
         job = self.get_job(job_id)
         if not job or job.get("project_id") != project_id or not job.get("result"):
             return None
+        selected_structure = structure_override or job["result"]
         with self.engine.begin() as connection:
             result = connection.execute(
                 projects.update()
                 .where(projects.c.id == project_id)
                 .values(
-                    analysis_result_json=_dump_structure(job["result"]),
-                    current_structure=_dump_structure(job["result"]),
+                    analysis_result_json=_dump_structure(selected_structure),
+                    current_structure=_dump_structure(selected_structure),
                     undo_stack="[]",
                     redo_stack="[]",
                     script_json=None,
@@ -351,7 +357,7 @@ class SQLiteRepository:
             connection.execute(script_versions.delete().where(script_versions.c.project_id == project_id))
         if result.rowcount == 0:
             return None
-        return {**job, "isReference": True}
+        return {**job, "result": VideoStructure.model_validate(selected_structure).model_dump(mode="json", by_alias=True), "isReference": True}
 
     def upsert_project(
         self,

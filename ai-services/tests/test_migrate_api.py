@@ -140,6 +140,143 @@ def test_migrator_derives_segment_source_from_asset_origin(tmp_path: Path) -> No
     assert script.segments[-1].source == "packaging"
 
 
+def test_migrator_preserves_explicit_reference_video_binding(tmp_path: Path) -> None:
+    repository = seeded_repository(tmp_path, description="Premium sleep earbuds for busy professionals")
+    source = repository.create_asset(
+        project_id="proj-1",
+        name="reference-source.mp4",
+        asset_type="video",
+        file_path=str(tmp_path / "reference-source.mp4"),
+        tag="参考样例原片",
+        analysis={"reference_source": True, "reference_job_id": "job-1"},
+        origin="uploaded",
+    )
+    structure = five_segment_structure()
+    structure["script"][0]["assetId"] = source["id"]
+    repository.upsert_project(project_id="proj-1", status="editing", current_structure=structure)
+    payload = final_script_payload(version="high_click")
+    payload["segments"][0]["asset_id"] = None
+
+    script = MigratorService(repository, client=FakeJsonClient([payload])).generate("proj-1", style="high_click")
+
+    assert script.segments[0].asset_id == source["id"]
+    assert script.segments[0].source == "original"
+
+
+def test_migrator_preserves_reference_timeline_when_llm_changes_timing(tmp_path: Path) -> None:
+    repository = seeded_repository(tmp_path, description="Premium sleep earbuds for busy professionals")
+    source = repository.create_asset(
+        project_id="proj-1",
+        name="reference-source.mp4",
+        asset_type="video",
+        file_path=str(tmp_path / "reference-source.mp4"),
+        tag="reference video",
+        analysis={"reference_source": True, "reference_job_id": "job-1"},
+        origin="uploaded",
+    )
+    structure = five_segment_structure()
+    structure["script"][0]["assetId"] = source["id"]
+    repository.upsert_project(project_id="proj-1", status="editing", current_structure=structure)
+    payload = final_script_payload(version="default")
+    payload["segments"][0]["start"] = 1.0
+    payload["segments"][0]["end"] = 4.0
+
+    script = MigratorService(repository, client=FakeJsonClient([payload])).generate("proj-1", style="default")
+
+    assert script.segments[0].start == 0.0
+    assert script.segments[0].end == 3.0
+    assert script.segments[0].duration == 3.0
+
+
+def test_high_click_style_does_not_force_reorder_without_ai_decision(tmp_path: Path) -> None:
+    repository = seeded_repository(tmp_path, description="Premium sleep earbuds for busy professionals")
+    source = repository.create_asset(
+        project_id="proj-1",
+        name="reference-source.mp4",
+        asset_type="video",
+        file_path=str(tmp_path / "reference-source.mp4"),
+        tag="reference video",
+        analysis={"reference_source": True, "reference_job_id": "job-1"},
+        origin="uploaded",
+    )
+    structure = five_segment_structure()
+    for segment in structure["script"]:
+        segment["assetId"] = source["id"]
+    repository.upsert_project(project_id="proj-1", status="editing", current_structure=structure)
+
+    script = MigratorService(
+        repository,
+        client=FakeJsonClient([final_script_payload(version="high_click")]),
+    ).generate("proj-1", style="high_click")
+
+    assert [segment.type for segment in script.segments[:3]] == ["hook", "pain", "product"]
+    assert script.segments[0].duration == 3.0
+    assert script.segments[1].source_start == 3.0
+    assert script.metadata["restructure_needed"] is False
+    assert "edit_plan" not in script.metadata
+
+
+def test_ai_restructure_decision_applies_proposed_order_and_source_ranges(tmp_path: Path) -> None:
+    repository = seeded_repository(tmp_path, description="Premium sleep earbuds for busy professionals")
+    source = repository.create_asset(
+        project_id="proj-1",
+        name="reference-source.mp4",
+        asset_type="video",
+        file_path=str(tmp_path / "reference-source.mp4"),
+        tag="reference video",
+        analysis={"reference_source": True, "reference_job_id": "job-1"},
+        origin="uploaded",
+    )
+    structure = five_segment_structure()
+    for segment in structure["script"]:
+        segment["assetId"] = source["id"]
+    repository.upsert_project(project_id="proj-1", status="editing", current_structure=structure)
+    payload = final_script_payload(version="high_click")
+    payload["segments"] = [
+        {**payload["segments"][0], "duration": 2.0, "end": 2.0},
+        {**payload["segments"][2], "start": 2.0, "end": 6.0, "duration": 4.0},
+        {**payload["segments"][1], "start": 6.0, "end": 11.0, "duration": 5.0},
+        *payload["segments"][3:],
+    ]
+    payload["metadata"].update(
+        {
+            "restructure_needed": True,
+            "edit_reason": "产品真实露出过晚，应在 Hook 后立即展示。",
+            "edit_plan": ["缩短 Hook", "将产品露出前移到第二段"],
+        }
+    )
+
+    script = MigratorService(repository, client=FakeJsonClient([payload])).generate("proj-1", style="high_click")
+
+    assert [segment.type for segment in script.segments[:3]] == ["hook", "product", "pain"]
+    assert script.segments[0].duration == 2.0
+    assert script.segments[1].start == 2.0
+    assert script.segments[1].source_start == 8.0
+    assert script.segments[1].source_end == 12.0
+    assert script.metadata["edit_reason"] == "产品真实露出过晚，应在 Hook 后立即展示。"
+
+
+def test_migrator_repairs_legacy_reference_project_before_generation(tmp_path: Path) -> None:
+    repository = seeded_repository(tmp_path, description="Premium sleep earbuds for busy professionals")
+    repository.create_job("job-legacy", str(tmp_path / "reference-source.mp4"), "proj-1")
+    repository.update_job("job-legacy", status="completed", progress=100, result=five_segment_structure())
+    repository.upsert_project(project_id="proj-1", status="editing", reference_job_id="job-legacy")
+
+    script = MigratorService(
+        repository,
+        client=FakeJsonClient([final_script_payload(version="high_click")]),
+    ).generate("proj-1", style="high_click")
+
+    source_asset = next(
+        asset for asset in repository.list_assets("proj-1")
+        if (asset.get("analysis") or {}).get("reference_source") is True
+    )
+    structure = repository.get_project("proj-1")["current_structure"]
+    assert all(segment["assetId"] == source_asset["id"] for segment in structure["script"])
+    assert all(segment.asset_id == source_asset["id"] for segment in script.segments)
+    assert script.segments[1].source_start == 3.0
+
+
 def test_migrator_uses_short_description_fallback_and_warns(tmp_path: Path) -> None:
     repository = seeded_repository(tmp_path, name="Headphones Pro", description="AI")
     client = FakeJsonClient([final_script_payload(version="fast_pace")])
@@ -182,15 +319,21 @@ def test_migrator_requires_product_information(tmp_path: Path) -> None:
         service.generate("proj-1")
 
 
-def test_migrator_retries_invalid_llm_output_three_times(tmp_path: Path) -> None:
+def test_migrator_retries_invalid_llm_output_then_falls_back(tmp_path: Path) -> None:
+    """After 3 invalid LLM outputs, gracefully falls back to template-based script."""
     repository = seeded_repository(tmp_path, description="A focused product description")
     client = FakeJsonClient([{"bad": "payload"}, {"still": "bad"}, {"wrong": "again"}])
     service = MigratorService(repository, client=client)
 
-    with pytest.raises(MigrationError, match="valid FinalScript"):
-        service.generate("proj-1")
-
+    # Should NOT raise — fallback script is returned after all retries fail.
+    script = service.generate("proj-1")
+    assert script is not None
+    assert len(script.segments) > 0
     assert client.calls == 3
+    # Fallback metadata confirms LLM was unavailable.
+    metadata = script.metadata or {}
+    warnings = [str(w) for w in (metadata.get("warnings") or [])]
+    assert any("LLM" in w or "AI" in w for w in warnings) or "LLM" in str(metadata.get("edit_reason", ""))
 
 
 def test_migrate_routes_generate_variants_and_read_saved_script(tmp_path: Path) -> None:

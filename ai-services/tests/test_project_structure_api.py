@@ -162,3 +162,4 @@ def test_multiple_samples_require_explicit_reference_switch(tmp_path, monkeypatc
     assert selected.json()["job_id"] == "job-2"
     assert selected.json()["isReference"] is True
     assert structure_after.json()["script"][0]["copy"] == "Second reference hook"
+    assert all(segment["assetId"] for segment in structure_after.json()["script"])

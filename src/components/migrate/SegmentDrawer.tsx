@@ -34,7 +34,7 @@ export function SegmentDrawer({ open, segment, assets, onClose, onApply }: Segme
   const update = <K extends keyof ScriptSegment>(key: K, value: ScriptSegment[K]) => setForm((current) => ({ ...(current ?? activeForm), [key]: value }));
 
   const apply = () => {
-    const duration = Number(activeForm.duration) || segment?.duration || 1;
+    const duration = Math.max(1, Number(activeForm.duration) || segment?.duration || 1);
     onApply(activeForm.id, {
       ...activeForm,
       duration,
@@ -83,7 +83,8 @@ export function SegmentDrawer({ open, segment, assets, onClose, onApply }: Segme
         </label>
         <label className="block text-sm font-semibold">
           {'\u5339\u914d\u7d20\u6750'}
-          <select value={activeForm.assetId ?? ''} onChange={(event) => update('assetId', event.target.value)} className="mt-2 h-11 w-full rounded-lg border border-border bg-card px-3 outline-none focus:border-primary focus:ring-2 focus:ring-primary/30">
+          <select value={activeForm.assetId ?? ''} onChange={(event) => update('assetId', event.target.value || undefined)} className="mt-2 h-11 w-full rounded-lg border border-border bg-card px-3 outline-none focus:border-primary focus:ring-2 focus:ring-primary/30">
+            <option value="">未绑定</option>
             {assets.map((asset) => <option key={asset.id} value={asset.id}>{asset.name}</option>)}
           </select>
         </label>

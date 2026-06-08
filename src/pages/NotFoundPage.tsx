@@ -1,19 +1,21 @@
 import { Link } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
-import { ErrorAlert } from '../components/ui/ErrorAlert';
 
 export default function NotFoundPage() {
   return (
-    <div className="mx-auto max-w-xl">
-      <ErrorAlert
-        title={'\u9875\u9762\u4e0d\u5b58\u5728'}
-        description={'\u8fd9\u4e2a\u5730\u5740\u6ca1\u6709\u5bf9\u5e94\u7684 StructForge \u9875\u9762\u3002'}
-        action={
+    <div className="flex min-h-[60vh] items-center justify-center">
+      <div className="text-center">
+        <p className="font-mono text-8xl font-bold text-border-visible">404</p>
+        <h2 className="mt-6 font-serif text-2xl font-bold">页面不存在</h2>
+        <p className="mt-2 text-sm leading-6 text-text-secondary">
+          这个地址没有对应的 StructForge 页面。
+        </p>
+        <div className="mt-8">
           <Link to="/projects">
-            <Button>{'\u8fd4\u56de\u9879\u76ee\u5217\u8868'}</Button>
+            <Button variant="primary">返回项目列表</Button>
           </Link>
-        }
-      />
+        </div>
+      </div>
     </div>
   );
 }

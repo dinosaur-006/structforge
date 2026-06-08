@@ -45,16 +45,19 @@ def test_llm_extraction_retries_invalid_payloads_until_valid() -> None:
 
 
 def test_llm_extraction_fails_after_three_invalid_attempts() -> None:
+    """After 3 invalid LLM attempts, system now falls back to local structure instead of crashing."""
     client = SequenceClient([{"script_structure": []}, {"script_structure": []}, {"bad": True}])
 
-    with pytest.raises(StructureExtractionError):
-        extract_structure_with_retries(
-            client=client,
-            prompt_context={"meta": {"duration": 35}},
-            max_attempts=3,
-        )
+    structure = extract_structure_with_retries(
+        client=client,
+        prompt_context={"meta": {"duration": 35}},
+        max_attempts=3,
+    )
 
     assert client.calls == 3
+    # Fallback should produce a valid structure with patched fields
+    assert structure.health.overall == 50  # fallback health score
+    assert structure.meta.productName == "未知商品"
 
 
 def test_parse_json_content_extracts_object_from_markdown_response() -> None:

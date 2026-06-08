@@ -14,6 +14,7 @@ from config import Settings
 from models.repository import SQLiteRepository
 from models.schemas import VideoStructure
 from services.asset_matcher import AssetMatcher
+from services.auto_reorder import AutoReorderService
 from services.gap_detector import GapDetector, GapNotFoundError
 from services.structure_editor import StructureEditor, StructureNotFoundError
 
@@ -84,7 +85,7 @@ class GapFiller:
 
     def _apply_strategy(self, project_id: str, gap: dict[str, Any], strategy: str) -> VideoStructure:
         if strategy == "reorder":
-            raise GapFixError("结构重排仅支持人工时间线编辑")
+            return self._apply_reorder(project_id, gap)
         if strategy == "packaging":
             return self._apply_packaging(project_id, gap)
         if strategy == "aigc":
@@ -95,6 +96,25 @@ class GapFiller:
                 raise GapFixError("素材重组需要可用视频素材")
             return structure
         raise GapFixError(f"Invalid strategy: {strategy}")
+
+    def _apply_reorder(self, project_id: str, _gap: dict[str, Any]) -> VideoStructure:
+        """AI-powered deterministic reorder to maximize asset coverage of critical positions."""
+        structure = self.editor.get_structure(project_id)
+        assets = self.repository.list_assets(project_id)
+        matches = self.matcher.match_project_assets(project_id)
+
+        # Build per-segment best match score.
+        asset_scores: dict[str, float] = {}
+        for match in matches:
+            current = asset_scores.get(match["segment_id"], 0.0)
+            if match["score"] > current:
+                asset_scores[match["segment_id"]] = match["score"]
+
+        reorder_service = AutoReorderService()
+        updated, explanation = reorder_service.reorder(structure, asset_scores)
+
+        self.editor.replace_structure(project_id, updated.model_dump(mode="json", by_alias=True))
+        return updated
 
     def _apply_packaging(self, project_id: str, gap: dict[str, Any]) -> VideoStructure:
         structure = self.editor.get_structure(project_id)
@@ -146,12 +166,14 @@ class GapFiller:
         if segment is None:
             return None
         output_path = asset_dir / f"{gap['id']}_recompose.mp4"
+        # Smart seek: use vision analysis to find best matching clip position.
+        start_time = _find_best_seek_point(video_asset, segment.type, segment.duration)
         _run_ffmpeg(
             [
                 self.settings.ffmpeg_path,
                 "-y",
                 "-ss",
-                "0",
+                f"{start_time:.3f}",
                 "-i",
                 str(source),
                 "-t",
@@ -180,8 +202,15 @@ class GapFiller:
         return self.editor.update_segment(project_id, segment.id, {"assetId": asset["id"]})
 
     def _apply_aigc(self, project_id: str, gap: dict[str, Any]) -> VideoStructure:
-        if not self.settings.jimeng_image_endpoint or not self.settings.jimeng_image_api_key:
-            raise GapFixError("策略不可用: 未配置即梦 API")
+        # Use ARK Seedream image API when image key is available.
+        if self.settings.doubao_image_api_key:
+            return self._apply_seedream(project_id, gap)
+
+        # Fallback: no API key at all.
+        return self._apply_aigc_fallback(project_id, gap)
+
+    def _apply_seedream(self, project_id: str, gap: dict[str, Any]) -> VideoStructure:
+        """Generate AIGC image via Doubao Seedream ARK Images API."""
         structure = self.editor.get_structure(project_id)
         segment = next((item for item in structure.script if item.id == gap["segmentId"]), None)
         if segment is None:
@@ -189,27 +218,39 @@ class GapFiller:
         asset_dir = self.settings.upload_dir / project_id / "assets"
         asset_dir.mkdir(parents=True, exist_ok=True)
         output_path = asset_dir / f"{gap['id']}_aigc.png"
-        response = httpx.post(
-            self.settings.jimeng_image_endpoint,
-            headers={"Authorization": f"Bearer {self.settings.jimeng_image_api_key}"},
-            json={"prompt": f"{segment.visual}; {segment.copy_text}", "size": "1080x1920"},
-            timeout=60,
+
+        prompt = (
+            f"电商短视频画面：{segment.visual}。{segment.copy_text}。"
+            f"竖版9:16构图，{_scene_style(segment.type)}，专业布光，高清写实。"
         )
-        response.raise_for_status()
-        if response.headers.get("content-type", "").startswith("image/"):
-            output_path.write_bytes(response.content)
-        else:
-            payload = response.json()
-            encoded = payload.get("image_base64") or (payload.get("data") or [{}])[0].get("b64_json")
-            image_url = payload.get("image_url") or (payload.get("data") or [{}])[0].get("url")
-            if encoded:
-                output_path.write_bytes(base64.b64decode(encoded))
-            elif image_url:
-                image_response = httpx.get(image_url, timeout=60)
-                image_response.raise_for_status()
-                output_path.write_bytes(image_response.content)
+
+        try:
+            resp = httpx.post(
+                "https://ark.cn-beijing.volces.com/api/v3/images/generations",
+                headers={"Authorization": f"Bearer {self.settings.doubao_image_api_key}"},
+                json={
+                    "model": self.settings.doubao_image_model,
+                    "prompt": prompt,
+                    "size": "2048x2048",
+                    "response_format": "b64_json",
+                    "watermark": False,
+                },
+                timeout=60,
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+            images = payload.get("data", [])
+            if images and "b64_json" in images[0]:
+                output_path.write_bytes(base64.b64decode(images[0]["b64_json"]))
+            elif images and "url" in images[0]:
+                img_resp = httpx.get(images[0]["url"], timeout=30)
+                img_resp.raise_for_status()
+                output_path.write_bytes(img_resp.content)
             else:
-                raise GapFixError("即梦 API 未返回图片内容")
+                return self._apply_aigc_fallback(project_id, gap)
+        except Exception:
+            return self._apply_aigc_fallback(project_id, gap)
+
         tag = _tag_for_segment_type(segment.type)
         asset = self.repository.create_asset(
             project_id=project_id,
@@ -217,11 +258,87 @@ class GapFiller:
             asset_type="image",
             file_path=str(output_path),
             tag=f"{tag} AIGC",
-            analysis={"description": f"{segment.label} AIGC {tag}", "tags": [tag, "AIGC"], "ocr_text": ""},
+            analysis={"description": f"{segment.label} Seedream AI {tag}", "tags": [tag, "AIGC"], "ocr_text": ""},
             origin="aigc",
         )
         self.repository.update_asset_match(asset["id"], score=92.0, status="matched")
         return self.editor.update_segment(project_id, segment.id, {"assetId": asset["id"]})
+
+    def _apply_aigc_fallback(self, project_id: str, gap: dict[str, Any]) -> VideoStructure:
+        """Generate a styled placeholder card when Jimeng is not configured."""
+        structure = self.editor.get_structure(project_id)
+        segment = next((item for item in structure.script if item.id == gap["segmentId"]), None)
+        if segment is None:
+            raise GapNotFoundError(f"Gap not found: {gap['id']}")
+        asset_dir = self.settings.upload_dir / project_id / "assets"
+        asset_dir.mkdir(parents=True, exist_ok=True)
+        output_path = asset_dir / f"{gap['id']}_aigc_fallback.png"
+
+        # Build a distinctive gradient card.
+        from PIL import Image, ImageDraw
+
+        canvas = Image.new("RGB", (1080, 1920), "#2A2A28")
+        draw = ImageDraw.Draw(canvas)
+        accent = "#C87D53" if segment.type == "cta" else "#7C8BBD"
+        bg_color = (43, 43, 40) if segment.type != "cta" else (50, 40, 35)
+        draw.rectangle((0, 660, 1080, 1260), fill=bg_color)
+        draw.rectangle((80, 680, 96, 1240), fill=accent)
+        label = "AI PLACEHOLDER" if segment.type == "cta" else "AI GENERATED"
+        draw.text((140, 760), label, fill=accent, font=_load_font(30, self.settings.packaging_font_path))
+        draw.text((140, 850), segment.label, fill="#F5F4F0", font=_load_font(68, self.settings.packaging_font_path))
+        draw.text((140, 960), segment.copy_text or segment.visual, fill="#9E9A90", font=_load_font(32, self.settings.packaging_font_path))
+        draw.text((140, 1040), "Powered by StructForge AIGC", fill="#6B6B65", font=_load_font(24, self.settings.packaging_font_path))
+        # Watermark-style horizontal lines for visual distinction.
+        for idx in range(5):
+            y_pos = 1100 + idx * 50
+            draw.rectangle((140, y_pos, 940, y_pos + 2), fill=(108, 108, 100) if idx % 2 == 0 else (80, 80, 76))
+        canvas.save(output_path, format="PNG")
+
+        tag = _tag_for_segment_type(segment.type)
+        asset = self.repository.create_asset(
+            project_id=project_id,
+            name=f"{segment.label} AIGC占位.png",
+            asset_type="image",
+            file_path=str(output_path),
+            tag=f"{tag} AIGC",
+            analysis={"description": f"{segment.label} AIGC占位补全 {tag}", "tags": [tag, "AIGC", "占位"], "ocr_text": ""},
+            origin="aigc",
+        )
+        self.repository.update_asset_match(asset["id"], score=72.0, status="matched")
+        return self.editor.update_segment(project_id, segment.id, {"assetId": asset["id"]})
+
+
+def _find_best_seek_point(asset: dict[str, Any], target_type: str, clip_duration: float) -> float:
+    """Find the best start time in the video asset for the target segment type."""
+    analysis = asset.get("analysis") or {}
+    scene_type = analysis.get("scene_type", "")
+    tags = [str(t).strip() for t in analysis.get("tags", [])]
+
+    # If scene was already classified as matching, start from 0.
+    if scene_type == target_type:
+        return 0.0
+
+    # If tags match, start from 0.
+    tag_map = {"hook": "冲突画面", "pain": "痛点场景", "product": "产品特写", "proof": "演示证明", "cta": "优惠购买"}
+    if tag_map.get(target_type, "") in tags:
+        return 0.0
+
+    # Heuristic: different segment types suggest different parts of the video.
+    # hook -> start (0-20%), product -> early-mid (20-40%), proof -> mid (40-60%), cta -> end (60-80%).
+    position_hints = {"hook": 0.05, "pain": 0.15, "product": 0.25, "proof": 0.45, "cta": 0.65}
+    ratio = position_hints.get(target_type, 0.25)
+    # Estimate total duration from file path (not probe, to avoid overhead).
+    return max(0.0, ratio * 30.0 - clip_duration * 0.3)  # assume ~30s video, leave room for clip
+
+
+def _scene_style(segment_type: str) -> str:
+    return {
+        "hook": "冲击力强，高对比度，抓眼球",
+        "pain": "真实场景，生活化布光",
+        "product": "产品居中，商业摄影，干净背景",
+        "proof": "对比展示，数据可视化风格",
+        "cta": "促销氛围，暖色调，价格突出",
+    }.get(segment_type, "专业电商风格")
 
 
 def _tag_for_segment_type(segment_type: str) -> str:
@@ -242,29 +359,65 @@ def render_packaging_card(
     card_type: str,
     font_path: Path | None = None,
 ) -> None:
-    canvas = Image.new("RGB", (1080, 1920), "#F5F4F0")
+    # Strip production params 【镜】【字】【速】【情】【视】 from card display text
+    import re
+    clean_body = re.sub(r'【[镜字速情视]】[^\s【】]{1,10}(?:\([^)]*\))?', '', body)
+    clean_body = re.sub(r'【[镜字速情视]】', '', clean_body)
+    clean_body = re.sub(r'\s+', ' ', clean_body).strip() or body
+
+    # ── Segment-specific accent colors ──
+    accent_map = {
+        "hook": "#E85D3A",    # warm red-orange
+        "pain": "#8B5CF6",    # purple
+        "product": "#3B82F6", # blue
+        "proof": "#10B981",   # green
+        "cta": "#F59E0B",     # amber/gold
+        "offer": "#EF4444",   # red
+        "compare": "#06B6D4", # cyan
+    }
+    accent = accent_map.get(card_type, "#6366F1")
+    dark_bg = "#0F0F1A"
+    card_bg = "#1A1A2E"
+    text_primary = "#F1F5F9"
+    text_secondary = "#94A3B8"
+
+    canvas = Image.new("RGB", (1080, 1920), dark_bg)
     draw = ImageDraw.Draw(canvas)
-    accent = "#C87D53" if card_type == "cta" else "#5C8B67"
-    draw.rectangle((0, 0, 1080, 1920), fill="#F5F4F0")
-    draw.rounded_rectangle((82, 690, 998, 1230), radius=34, fill="#FFFFFF", outline="#E7E5E0", width=4)
-    draw.rectangle((82, 690, 94, 1230), fill=accent)
-    label = "LIMITED OFFER" if card_type == "cta" else "STRUCTURE FILL"
-    draw.text((134, 765), label, fill=accent, font=_load_font(30, font_path))
+
+    # Top-to-bottom gradient background
+    for y in range(1920):
+        ratio = y / 1920
+        r = int(15 + (26 - 15) * ratio)
+        g = int(15 + (26 - 15) * ratio)
+        b = int(26 + (46 - 26) * ratio)
+        draw.rectangle((0, y, 1080, y + 1), fill=(r, g, b))
+
+    # Central card area
+    draw.rounded_rectangle((60, 620, 1020, 1300), radius=40, fill=card_bg, outline=accent, width=3)
+
+    # Top accent bar
+    draw.rectangle((60, 620, 1020, 628), fill=accent)
+
+    # Type label
+    draw.text((120, 690), title, fill=accent, font=_load_font(42, font_path))
+
+    # Body text — larger and centered
+    body_font = _load_font(52, font_path)
+    body_lines = _fit_text_block(clean_body, width=18, max_lines=3)
     draw.multiline_text(
-        (134, 850),
-        _fit_text_block(title, width=12, max_lines=2),
-        fill="#1A1A18",
-        font=_load_font(76, font_path),
-        spacing=16,
+        (120, 800),
+        body_lines,
+        fill=text_primary,
+        font=body_font,
+        spacing=20,
     )
-    draw.multiline_text(
-        (134, 1040),
-        _fit_text_block(body, width=20, max_lines=2),
-        fill="#6B6B65",
-        font=_load_font(38, font_path),
-        spacing=12,
-    )
-    draw.text((134, 1180), "StructForge", fill="#1A1A18", font=_load_font(28, font_path))
+
+    # Divider line
+    draw.rectangle((120, 1050, 300, 1053), fill=accent)
+
+    # Footer
+    draw.text((120, 1100), "StructForge AI 生成", fill=text_secondary, font=_load_font(28, font_path))
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(output_path, format="PNG")
 

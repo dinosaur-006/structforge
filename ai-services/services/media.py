@@ -102,7 +102,17 @@ def detect_scenes(source_path: Path, duration: float, settings: Settings) -> lis
                 "duration_ms": max(0, end_ms - start_ms),
             }
         )
-    return scenes or [_whole_video_scene(duration)]
+    results: list[dict[str, Any]] = []
+    for start_time, end_time in scene_list:
+        start_ms = int(start_time.get_seconds() * 1000)
+        end_ms = int(end_time.get_seconds() * 1000)
+        results.append({
+            "start_ms": start_ms, "end_ms": end_ms,
+            "duration_ms": max(0, end_ms - start_ms),
+            "start_s": round(start_ms / 1000, 2),
+            "end_s": round(end_ms / 1000, 2),
+        })
+    return results or [_whole_video_scene(duration)]
 
 
 def _whole_video_scene(duration: float) -> dict[str, int]:

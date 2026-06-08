@@ -1,5 +1,5 @@
-import { Circle, Film, MoreVertical, Plus, Trash2, Video } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { ArrowRight, Circle, Film, FlaskConical, MoreVertical, Plus, Search, Trash2, Video, Wand2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -43,10 +43,24 @@ export default function ProjectListPage() {
   const [offer, setOffer] = useState('');
   const [tone, setTone] = useState('');
   const [mandatoryClaims, setMandatoryClaims] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
 
   useEffect(() => {
     void fetchProjects();
   }, [fetchProjects]);
+
+  const filteredProjects = useMemo(() => {
+    let result = projects;
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      result = result.filter((p) => p.name.toLowerCase().includes(q) || (p.description || '').toLowerCase().includes(q));
+    }
+    if (statusFilter !== 'all') {
+      result = result.filter((p) => p.status === statusFilter);
+    }
+    return result;
+  }, [projects, searchQuery, statusFilter]);
 
   const createProject = async () => {
     if (!name.trim()) return;
@@ -84,7 +98,64 @@ export default function ProjectListPage() {
         }
       />
 
-      {projects.length === 0 ? (
+      {/* Onboarding guide for new users */}
+      {projects.length <= 1 ? (
+        <div className="grid gap-3 md:grid-cols-3 animate-in">
+          {[
+            { step: '1', icon: Video, title: '上传样例视频', desc: '选择一条表现好的带货短视频，AI会自动分析其脚本、节奏和包装结构' },
+            { step: '2', icon: Wand2, title: 'AI自动优化', desc: '输入新产品信息后，AI自动补全素材缺口、优化结构、生成新脚本' },
+            { step: '3', icon: FlaskConical, title: '导出成品视频', desc: '生成多版本脚本方案，渲染为MP4视频，下载或直接发布' },
+          ].map((s) => {
+            const Icon = s.icon;
+            return (
+              <div key={s.step} className="rounded-lg border border-border-visible bg-card p-4">
+                <div className="flex items-center gap-2 text-sm text-text-muted">
+                  <span className="grid h-6 w-6 place-items-center rounded-full bg-primary-muted text-xs font-bold text-primary">{s.step}</span>
+                  <ArrowRight className="h-3 w-3" />
+                </div>
+                <div className="mt-3 grid h-10 w-10 place-items-center rounded-lg bg-primary-muted text-primary">
+                  <Icon className="h-5 w-5" />
+                </div>
+                <h3 className="mt-3 font-semibold text-sm">{s.title}</h3>
+                <p className="mt-1 text-xs leading-5 text-text-secondary">{s.desc}</p>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {/* Search + filter bar */}
+      {projects.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-1 items-center gap-2 rounded-lg border border-border-visible bg-card px-3 py-2">
+            <Search className="h-4 w-4 text-text-muted" />
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="搜索项目..."
+              className="flex-1 bg-transparent text-sm outline-none placeholder:text-text-muted"
+            />
+          </div>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="h-10 rounded-lg border border-border-visible bg-card px-3 text-sm outline-none"
+          >
+            <option value="all">全部状态</option>
+            <option value="draft">草稿</option>
+            <option value="editing">编辑中</option>
+            <option value="completed">已完成</option>
+          </select>
+        </div>
+      ) : null}
+
+      {filteredProjects.length === 0 && projects.length > 0 ? (
+        <EmptyState
+          icon={<Search className="h-8 w-8" />}
+          title="未找到匹配项目"
+          description={searchQuery ? `没有名称或描述包含 "${searchQuery}" 的项目` : '没有符合筛选条件的项目'}
+        />
+      ) : projects.length === 0 ? (
         <EmptyState
           icon={<Film className="h-8 w-8" />}
           title={labels.emptyTitle}
@@ -98,12 +169,12 @@ export default function ProjectListPage() {
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {projects.map((project) => {
+          {filteredProjects.map((project) => {
             const meta = projectStatusMeta[project.status];
             return (
               <article
                 key={project.id}
-                className="group cursor-pointer rounded-lg border border-border bg-card p-4 shadow-sm transition-colors duration-200 hover:border-primary/40 hover:bg-sidebar/50 hover:shadow-md"
+                className="group cursor-pointer rounded-lg border border-border-visible bg-card p-4 shadow-sm transition-all duration-300 hover:border-primary/30 hover:bg-card-hover hover:shadow-raised card-accent"
                 onClick={() => navigate(projectDestination(project))}
               >
                 <div className="relative mb-4 grid aspect-video place-items-center overflow-hidden rounded-lg border border-border bg-sidebar">

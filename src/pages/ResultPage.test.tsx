@@ -159,7 +159,7 @@ describe('ResultPage', () => {
     const user = userEvent.setup();
     renderRoute('/result/proj-1');
     await user.click(await screen.findByRole('button', { name: /\u9ad8\u70b9\u51fb\u7248/ }));
-    expect(screen.getByText(/\+5/)).toBeInTheDocument();
+    expect(screen.getAllByText(/\+5/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/8\.0s.*7\.0s/)).toBeInTheDocument();
   });
 
@@ -205,6 +205,42 @@ describe('ResultPage', () => {
     renderRoute('/result/proj-1');
 
     expect(await screen.findByText('Generated hook')).toBeInTheDocument();
+  });
+
+  it('shows the AI structural-edit decision and its reason', async () => {
+    const restructuredScript = {
+      ...finalScript,
+      metadata: {
+        warnings: [],
+        restructure_needed: true,
+        edit_reason: '\u4ea7\u54c1\u771f\u5b9e\u9732\u51fa\u8fc7\u665a\uff0c\u9700\u5728 Hook \u540e\u7acb\u5373\u5c55\u793a\u3002',
+      },
+    };
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify([project]), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(evaluatedVersions), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(restructuredScript), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+    renderRoute('/result/proj-1');
+
+    expect(await screen.findByText(/\u5df2\u5efa\u8bae\u91cd\u6784\u89c6\u9891\u7ed3\u6784/)).toBeInTheDocument();
+    expect(screen.getByText(/\u4ea7\u54c1\u771f\u5b9e\u9732\u51fa\u8fc7\u665a/)).toBeInTheDocument();
+  });
+
+  it('blocks rendering for an old reordered script without a recorded AI decision', async () => {
+    const legacyScript = {
+      ...finalScript,
+      segments: [{ ...finalScript.segments[0], source: 'reorder' as const }],
+    };
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify([project]), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(evaluatedVersions), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(legacyScript), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+    renderRoute('/result/proj-1');
+
+    expect(await screen.findByText(/\u672a\u6838\u9a8c\u7684\u7ed3\u6784\u91cd\u6392/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /\u5bfc\u51fa\u89c6\u9891/ })).toBeDisabled();
   });
 
   it('shows service-derived source for generated timeline segments', async () => {
@@ -284,7 +320,8 @@ describe('ResultPage', () => {
 
     renderRoute('/result/proj-1');
     await user.click(await screen.findByRole('button', { name: /\u5bfc\u51fa\u89c6\u9891/ }));
-    await user.click(screen.getByRole('button', { name: /\u5f00\u59cb\u5bfc\u51fa/ }));
+    // New simplified dialog: one button does both open and start
+    await user.click(screen.getByRole('button', { name: /\u5bfc\u51fa MP4/ }));
 
     expect(await screen.findByTestId('rendered-video')).toHaveAttribute('src', 'http://127.0.0.1:8000/outputs/proj-1/original.mp4');
     expect(screen.getByRole('link', { name: /\u4e0b\u8f7d\u89c6\u9891/ })).toHaveAttribute('href', 'http://127.0.0.1:8000/outputs/proj-1/original.mp4');
@@ -304,8 +341,8 @@ describe('ResultPage', () => {
     await user.click(await screen.findByRole('button', { name: /\u5bfc\u51fa\u89c6\u9891/ }));
 
     expect(screen.queryByText(/PDF/)).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /\u4e0b\u8f7d\u811a\u672c JSON/ }));
-    await user.click(screen.getByRole('button', { name: /\u4e0b\u8f7d\u5b57\u5e55 SRT/ }));
+    await user.click(screen.getByRole('button', { name: /\u811a\u672c JSON/ }));
+    await user.click(screen.getByRole('button', { name: /\u5b57\u5e55 SRT/ }));
     expect(createObjectURL).toHaveBeenCalledTimes(2);
   });
 });

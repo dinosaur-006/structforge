@@ -123,7 +123,7 @@ describe('AnalyzePage', () => {
         <AnalyzePage />
       </MemoryRouter>,
     );
-    await user.click(screen.getByRole('button', { name: /\u5bfc\u51fa JSON/ }));
+    await user.click(screen.getByRole('button', { name: /\u5bfc\u51fa\u7ed3\u6784 JSON/ }));
 
     expect(createObjectURL).toHaveBeenCalledTimes(1);
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:analysis');

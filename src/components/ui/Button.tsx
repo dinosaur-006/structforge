@@ -7,16 +7,20 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variants = {
-  primary: 'border-primary bg-primary text-white shadow-sm hover:border-primary-hover hover:bg-primary-hover active:border-primary-active active:bg-primary-active',
-  secondary: 'border-border bg-card text-text-primary shadow-sm hover:border-primary/40 hover:bg-sidebar active:bg-border/30',
-  ghost: 'border-transparent bg-transparent text-text-secondary hover:bg-sidebar hover:text-text-primary active:bg-border/40',
-  danger: 'border-error/30 bg-card text-error hover:bg-error/10 active:bg-error/15',
+  primary:
+    'border-primary/20 bg-primary text-surface font-semibold shadow-glow hover:border-primary/40 hover:bg-primary-hover active:bg-primary-active transition-all duration-200',
+  secondary:
+    'border-border-visible bg-card text-text-primary hover:border-primary/30 hover:bg-card-hover active:bg-card-raised transition-all duration-200',
+  ghost:
+    'border-transparent bg-transparent text-text-secondary hover:bg-card-hover hover:text-text-primary active:bg-card-raised transition-all duration-200',
+  danger:
+    'border-error/30 bg-error-muted text-error hover:bg-error/20 active:bg-error/30 transition-all duration-200',
 };
 
 const sizes = {
-  sm: 'min-h-9 px-3 text-xs',
-  md: 'min-h-11 px-4 text-sm',
-  icon: 'h-11 w-11 p-0',
+  sm: 'min-h-9 px-3 text-xs rounded-md',
+  md: 'min-h-11 px-4 text-sm rounded-lg',
+  icon: 'h-10 w-10 p-0 rounded-lg',
 };
 
 export function Button({ variant = 'secondary', size = 'md', className, type = 'button', ...props }: ButtonProps) {
@@ -24,7 +28,7 @@ export function Button({ variant = 'secondary', size = 'md', className, type = '
     <button
       type={type}
       className={cn(
-        'inline-flex items-center justify-center gap-2 rounded-lg border font-semibold transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:ring-offset-2 focus:ring-offset-surface disabled:cursor-not-allowed disabled:opacity-50',
+        'inline-flex items-center justify-center gap-2 border font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:cursor-not-allowed disabled:opacity-40',
         variants[variant],
         sizes[size],
         className,

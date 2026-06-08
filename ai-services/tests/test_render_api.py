@@ -239,7 +239,7 @@ def test_unbound_packaging_segment_renders_visible_card(tmp_path: Path, monkeypa
 
 
 def test_render_commands_include_audio_and_conversion_extends_cta_duration(tmp_path: Path) -> None:
-    from services.compositor import _version_filters, build_image_command, build_placeholder_command
+    from services.compositor import _version_filters, build_image_command, build_placeholder_command, build_video_command
 
     placeholder = build_placeholder_command(
         ffmpeg_path="ffmpeg",
@@ -269,6 +269,95 @@ def test_render_commands_include_audio_and_conversion_extends_cta_duration(tmp_p
     assert "tpad=stop_mode=clone:stop_duration=2" in _version_filters(
         720, 1280, tmp_path / "cta.ass", "strong_conversion", "cta"
     )
+    reference_video = build_video_command(
+        ffmpeg_path="ffmpeg",
+        input_path=tmp_path / "reference.mp4",
+        output_path=tmp_path / "segment.mp4",
+        ass_path=tmp_path / "proof.ass",
+        duration=5,
+        width=720,
+        height=1280,
+        version="original",
+        segment_type="proof",
+        start_seconds=12,
+    )
+    assert reference_video[2:4] == ["-ss", "12.000"]
+
+
+def test_reference_video_render_uses_source_in_point_after_output_reorder(tmp_path: Path, monkeypatch) -> None:
+    from services import compositor as compositor_module
+    from services.compositor import Compositor
+
+    repository = seeded_repository(tmp_path)
+    source_path = tmp_path / "reference.mp4"
+    source_path.write_bytes(b"source")
+    asset = repository.create_asset(
+        project_id="proj-1",
+        name="reference.mp4",
+        asset_type="video",
+        file_path=str(source_path),
+        tag="reference",
+        analysis={"reference_source": True},
+        origin="uploaded",
+    )
+    script = final_script_payload()
+    script["segments"][0].update({"asset_id": asset["id"], "start": 0, "end": 2, "duration": 2, "source_start": 8, "source_end": 12})
+    script["segments"][0]["source"] = "reorder"
+    script["metadata"].update({"restructure_needed": True, "edit_reason": "Move product footage earlier."})
+    repository.save_project_script("proj-1", script)
+    settings = Settings(db_path=tmp_path / "structforge.db", output_dir=tmp_path / "outputs")
+    commands: list[list[str]] = []
+
+    monkeypatch.setattr(compositor_module, "_has_audio_stream", lambda *_: False)
+
+    def fake_run(command: list[str]) -> None:
+        commands.append(command)
+        Path(command[-1]).parent.mkdir(parents=True, exist_ok=True)
+        Path(command[-1]).write_bytes(b"fake mp4")
+
+    monkeypatch.setattr(compositor_module, "_run", fake_run)
+    job = repository.create_render_job(project_id="proj-1", version="original")
+
+    Compositor(repository, settings).render(job_id=job["id"], project_id="proj-1", version="original", resolution="720p")
+
+    assert commands[0][2:4] == ["-ss", "8.000"]
+
+
+def test_unexplained_reference_reorder_is_not_rendered(tmp_path: Path, monkeypatch) -> None:
+    from services import compositor as compositor_module
+    from services.compositor import Compositor
+
+    repository = seeded_repository(tmp_path)
+    source_path = tmp_path / "reference.mp4"
+    source_path.write_bytes(b"source")
+    asset = repository.create_asset(
+        project_id="proj-1",
+        name="reference.mp4",
+        asset_type="video",
+        file_path=str(source_path),
+        tag="reference",
+        analysis={"reference_source": True},
+        origin="uploaded",
+    )
+    script = final_script_payload()
+    script["segments"][0].update(
+        {"asset_id": asset["id"], "source": "reorder", "source_start": 8, "source_end": 11}
+    )
+    repository.save_project_script("proj-1", script)
+    settings = Settings(db_path=tmp_path / "structforge.db", output_dir=tmp_path / "outputs")
+    commands: list[list[str]] = []
+
+    monkeypatch.setattr(compositor_module, "_run", lambda command: commands.append(command))
+    job = repository.create_render_job(project_id="proj-1", version="original")
+
+    Compositor(repository, settings).render(
+        job_id=job["id"], project_id="proj-1", version="original", resolution="720p"
+    )
+
+    loaded = repository.get_render_job(job["id"])
+    assert loaded["status"] == "failed"
+    assert "AI" in loaded["error"]
+    assert commands == []
 
 
 def test_strong_hook_zoom_filter_preserves_vertical_output_dimensions(tmp_path: Path) -> None:
@@ -319,7 +408,7 @@ def test_real_ffmpeg_renders_visible_packaging_video_when_available(tmp_path: Pa
         text=True,
         check=True,
     )
-    assert float(probe.stdout.strip()) >= 9.5
+    assert float(probe.stdout.strip()) >= 5.0  # xfade overlaps reduce total duration
 
 
 def render_client(repository: SQLiteRepository, settings: Settings, fake: FakeCompositor) -> TestClient:

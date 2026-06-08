@@ -4,6 +4,11 @@ import { ErrorAlert } from '../ui/ErrorAlert';
 import { Button } from '../ui/Button';
 import { cn } from '../../shared/cn';
 
+function fileSizeMB(file: File): string {
+  const mb = file.size / (1024 * 1024);
+  return `${file.name} · ${mb >= 1 ? `${mb.toFixed(0)}MB` : `${(file.size / 1024).toFixed(0)}KB`}`;
+}
+
 interface VideoUploaderProps {
   file: File | null;
   onFile: (file: File | null) => void;
@@ -83,7 +88,7 @@ export function VideoUploader({ file, onFile, onFiles, onStart, disabled, fileCo
                   {fileCount > 1 ? `\u5df2\u9009\u62e9\uff1a${fileCount} \u6761\u6837\u4f8b\u89c6\u9891` : `\u5df2\u4e0a\u4f20\uff1a${file.name}`}
                 </span>
               </div>
-              <p className="mt-3 text-sm text-text-secondary">35s {'\u00b7'} 1080x1920 {'\u00b7'} 42MB</p>
+              <p className="mt-3 text-sm text-text-secondary">{fileSizeMB(file)}</p>
               <div className="mt-6 flex flex-wrap gap-3">
                 <Button variant="secondary" onClick={() => inputRef.current?.click()} disabled={disabled}>
                   <RefreshCcw className="h-4 w-4" />

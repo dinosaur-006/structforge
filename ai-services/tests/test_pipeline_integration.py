@@ -94,6 +94,7 @@ def test_project_analyze_structure_api_integration(tmp_path: Path, monkeypatch) 
     status = client.get(f"/api/v1/analyze/{upload.json()['job_id']}")
     refreshed_project = client.get(f"/api/v1/projects/{project['id']}")
     structure = client.get(f"/api/v1/structure/{project['id']}")
+    assets = client.get(f"/api/v1/assets/{project['id']}")
     updated = client.put(
         f"/api/v1/structure/{project['id']}/segment/seg-1",
         json={"copy": "Integration edit"},
@@ -103,6 +104,8 @@ def test_project_analyze_structure_api_integration(tmp_path: Path, monkeypatch) 
     assert status.json()["status"] == "completed"
     assert refreshed_project.json()["status"] == "editing"
     assert len(structure.json()["script"]) >= 3
+    source_asset = next(asset for asset in assets.json() if asset["type"] == "video")
+    assert all(segment["assetId"] == source_asset["id"] for segment in structure.json()["script"])
     assert updated.json()["script"][0]["copy"] == "Integration edit"
 
 

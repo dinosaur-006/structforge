@@ -4,7 +4,7 @@ import threading
 from collections.abc import Callable
 from typing import Protocol
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 
 from config import Settings
 from models.repository import SQLiteRepository
@@ -68,6 +68,15 @@ def build_render_router(
                 repository.update_render_job(job["id"], status="failed", progress=100, error="Failed to dispatch render task")
                 raise HTTPException(status_code=503, detail="Failed to dispatch render task") from exc
         return {"job_id": job["id"]}
+
+    @router.delete("/{job_id}", status_code=204)
+    async def cancel_render(job_id: str):
+        job = repository.get_render_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Render job not found")
+        if job["status"] in ("pending", "processing"):
+            repository.update_render_job(job_id, status="failed", progress=100, error="Cancelled by user")
+        return Response(status_code=204)
 
     @router.get("/{job_id}", response_model=RenderProgress)
     async def get_render_job(job_id: str) -> dict:

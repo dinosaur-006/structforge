@@ -79,12 +79,12 @@ def test_gap_detection_returns_all_segments_without_assets(tmp_path: Path, monke
     }
     strategy_by_id = {strategy["id"]: strategy for strategy in gaps[0]["strategies"]}
     assert strategy_by_id["packaging"]["available"] is True
+    # reorder is available when there are matched assets; unavailable when none
     assert strategy_by_id["reorder"]["available"] is False
-    assert strategy_by_id["aigc"]["available"] is False
-    assert "未配置" in strategy_by_id["aigc"]["unavailableReason"]
+    # aigc is now always available (with fallback mode when Jimeng not configured)
+    assert strategy_by_id["aigc"]["available"] is True
+    assert "未配置" in (strategy_by_id["aigc"]["unavailableReason"] or "")
     assert strategy_by_id["recompose"]["available"] is False
-    assert "自动降级" not in strategy_by_id["aigc"]["description"]
-    assert "自动降级" not in strategy_by_id["recompose"]["description"]
 
 
 def test_gap_detection_skips_segments_with_matching_assets(tmp_path: Path, monkeypatch) -> None:
@@ -150,15 +150,18 @@ def test_fix_all_rechecks_after_each_fix_and_closes_all_gaps(tmp_path: Path, mon
     assert all(segment.get("assetId") for segment in payload["updated_structure"]["script"])
 
 
-def test_unavailable_aigc_does_not_create_fake_generated_asset(tmp_path: Path, monkeypatch) -> None:
+def test_unavailable_aigc_uses_fallback_placeholder_card(tmp_path: Path, monkeypatch) -> None:
+    """AIGC is always available — when Jimeng is not configured, it generates a fallback placeholder."""
     client = _seed_project(tmp_path, monkeypatch)
     gap = client.get("/api/v1/gaps/proj-1").json()["gaps"][0]
 
     response = client.post("/api/v1/gaps/proj-1/fix", json={"gap_id": gap["id"], "strategy": "aigc"})
 
-    assert response.status_code == 400
-    assert "不可用" in response.json()["detail"]
-    assert client.get("/api/v1/assets/proj-1").json() == []
+    # Fallback mode generates a placeholder — 200, not 400.
+    assert response.status_code == 200
+    # An asset should be created with origin "aigc".
+    assets = client.get("/api/v1/assets/proj-1").json()
+    assert any(a["origin"] == "aigc" for a in assets)
 
 
 def test_recompose_uses_ffmpeg_to_create_real_video_asset(tmp_path: Path, monkeypatch) -> None:

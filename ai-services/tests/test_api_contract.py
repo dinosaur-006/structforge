@@ -60,6 +60,7 @@ def test_capabilities_expose_readiness_without_credentials(tmp_path, monkeypatch
     payload = response.json()
     assert payload["llm"]["state"] == "configured"
     assert payload["llm"]["detail"] == "已提供 LLM 配置；首次真实生成时验证授权可用性"
-    assert payload["vision"]["state"] == "fallback"
+    assert payload["vision"]["state"] == "configured"
+    assert "多模态" in payload["vision"]["detail"]
     assert payload["taskExecution"]["state"] == "inline"
     assert "do-not-return-this-key" not in response.text

@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class StrictModel(BaseModel):
@@ -22,6 +22,7 @@ class VideoMeta(StrictModel):
     resolution: str
     shots: int = Field(ge=0)
     coverLabel: str
+    productName: str = ""
 
 
 SegmentType = Literal["hook", "pain", "product", "proof", "cta"]
@@ -37,6 +38,7 @@ class ScriptSegment(StrictModel):
     goal: str
     copy_text: str = Field(alias="copy")
     visual: str
+    visual_keywords: list[str] = Field(default_factory=list)
     healthScore: int = Field(ge=0, le=100)
     locked: bool | None = None
     assetId: str | None = None
@@ -53,9 +55,28 @@ class RhythmPoint(StrictModel):
 
 
 class PackagingStructure(StrictModel):
-    subtitleStyle: list[str]
-    transitions: list[str]
-    overlays: list[str]
+    subtitleStyle: list[str] = Field(default_factory=list)
+    transitions: list[str] = Field(default_factory=list)
+    overlays: list[str] = Field(default_factory=list)
+
+    @field_validator("subtitleStyle", mode="before")
+    @classmethod
+    def _coerce_subtitle_style(cls, v: object) -> list[str]:
+        """Accept string from LLM, auto-wrap to list."""
+        if isinstance(v, str):
+            return [v]
+        if isinstance(v, list):
+            return [str(item) for item in v]
+        return []
+
+    @field_validator("overlays", mode="before")
+    @classmethod
+    def _coerce_overlays(cls, v: object) -> list[str]:
+        if isinstance(v, str):
+            return [v]
+        if isinstance(v, list):
+            return [str(item) for item in v]
+        return []
 
 
 class HealthScores(StrictModel):
@@ -110,6 +131,7 @@ class CapabilityStatusOut(StrictModel):
     vision: CapabilityItem
     asr: CapabilityItem
     aigc: CapabilityItem
+    videoGeneration: CapabilityItem | None = None
     taskExecution: CapabilityItem
 
 
@@ -154,6 +176,15 @@ class StructureActionResponse(StrictModel):
     action: Literal["undo", "redo"]
     available: bool
     structure: VideoStructure
+
+
+class NLEditRequest(StrictModel):
+    command: str
+
+
+class NLEditResponse(StrictModel):
+    structure: VideoStructure
+    changes_summary: str
 
 
 AssetType = Literal["image", "video", "text"]
@@ -246,7 +277,7 @@ class GapFixAllResponse(StrictModel):
     assets: list[AssetOut] = Field(default_factory=list)
 
 
-FinalScriptStyle = Literal["high_click", "high_conversion", "fast_pace", "high_quality", "default"]
+FinalScriptStyle = Literal["high_click", "high_conversion", "fast_pace", "high_quality", "xiaohongshu_ces", "wechat_social", "default"]
 FinalSegmentSource = Literal["original", "reorder", "packaging", "aigc", "recompose"]
 
 
@@ -256,13 +287,24 @@ class FinalSegment(StrictModel):
     start: float = Field(ge=0)
     end: float = Field(ge=0)
     duration: float = Field(ge=0)
-    script: str
-    visual: str
+    script: str                    # Clean spoken script (NO production params)
+    visual: str                    # Visual description for the scene
     asset_id: str | None = None
     subtitle_style: str
     transition: str
     locked: bool = False
     source: FinalSegmentSource = "original"
+    source_start: float | None = Field(default=None, ge=0)
+    source_end: float | None = Field(default=None, ge=0)
+    # ── Production parameters (separate from script text) ──
+    camera: str = "静态"           # 镜头运动: 静态/缓推/快推/拉远/横移/跟随/手持微晃
+    subtitle_anim: str = "淡入"    # 字幕动画: 弹入/淡入/逐字出现/缩放出现/无动画
+    pace: str = "正常"             # 语速: 快/正常/慢
+    emotion: str = "亲切"          # 语气: 惊讶/紧迫/亲切/权威/感动/兴奋/平静
+    visual_fx: str = "无"          # 画面特效: 无/震屏/闪白/慢动作/放大/模糊过渡
+    # ── Structured visual requirements for gap auditing ──
+    visual_requirements: dict[str, str] = Field(default_factory=dict)
+    # e.g. {{"scene": "满是油污的厨房", "action": "皱眉抓狂", "object": "手持清洁剂特写", "emotion": "紧迫焦虑"}}
 
 
 class FinalScript(StrictModel):
@@ -301,6 +343,9 @@ class ResultTimelineOut(StrictModel):
     start: float
     end: float
     source: FinalSegmentSource
+    thumbnail_url: str | None = None
+    subtitle: str | None = None
+    script: str | None = None
 
 
 class ResultVersionOut(StrictModel):

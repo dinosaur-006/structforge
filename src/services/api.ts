@@ -87,22 +87,87 @@ export interface RenderProgressResponse {
   warnings: string[];
 }
 
+export type UploadProgressCallback = (percent: number) => void;
+
+export function uploadWithProgress(
+  url: string,
+  formData: FormData,
+  onProgress: UploadProgressCallback,
+): Promise<AnalysisJob> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    xhr.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+    });
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(JSON.parse(xhr.responseText));
+      } else {
+        try {
+          const body = JSON.parse(xhr.responseText);
+          reject(new ApiError(body.detail || xhr.statusText, xhr.status));
+        } catch {
+          reject(new ApiError(xhr.statusText, xhr.status));
+        }
+      }
+    });
+    xhr.addEventListener('error', () => reject(new ApiError('Network error', 0)));
+    xhr.send(formData);
+  });
+}
+
+const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
+const MAX_RETRIES = 2;
+const RETRY_BASE_DELAY_MS = 1000;
+
+function shouldRetry(method: string, status: number): boolean {
+  if (!RETRYABLE_STATUSES.has(status)) return false;
+  // Non-idempotent methods only retry on rate-limit or service-unavailable.
+  if (method !== 'GET' && method !== 'HEAD' && status !== 429 && status !== 503) return false;
+  return true;
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const init: RequestInit = { ...options };
   const isFormData = init.body instanceof FormData;
+  const method = (init.method ?? 'GET').toUpperCase();
 
   if (init.body && !isFormData) {
     init.headers = { 'Content-Type': 'application/json', ...(init.headers ?? {}) };
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, init);
-  if (!response.ok) {
-    throw new ApiError(await extractErrorMessage(response), response.status);
+  // Include API key when configured.
+  const apiKey = (globalThis as Record<string, unknown>).__structforge_api_key as string | undefined;
+  if (apiKey) {
+    init.headers = { 'X-API-Key': apiKey, ...(init.headers ?? {}) };
   }
 
-  if (response.status === 204) return undefined as T;
-  const text = await response.text();
-  return (text ? JSON.parse(text) : undefined) as T;
+  let lastError: ApiError | null = null;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const response = await fetch(`${API_BASE_URL}${path}`, init);
+
+    if (response.ok) {
+      if (response.status === 204) return undefined as T;
+      const text = await response.text();
+      return (text ? JSON.parse(text) : undefined) as T;
+    }
+
+    const errorMessage = await extractErrorMessage(response);
+    const error = new ApiError(errorMessage, response.status);
+
+    if (attempt < MAX_RETRIES && shouldRetry(method, response.status)) {
+      const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      lastError = error;
+      continue;
+    }
+
+    throw error;
+  }
+
+  throw lastError ?? new ApiError('Request failed', 0);
 }
 
 async function extractErrorMessage(response: Response): Promise<string> {
@@ -172,4 +237,27 @@ export const api = {
   undo: (projectId: string) => request<StructureActionResponse>(`/api/v1/structure/${projectId}/undo`, { method: 'POST' }),
   redo: (projectId: string) => request<StructureActionResponse>(`/api/v1/structure/${projectId}/redo`, { method: 'POST' }),
   resetStructure: (projectId: string) => request<VideoStructure>(`/api/v1/structure/${projectId}/reset`, { method: 'POST' }),
+  nlEditStructure: (projectId: string, command: string) =>
+    request<{ structure: VideoStructure; changes_summary: string }>(`/api/v1/structure/${projectId}/nl-edit`, {
+      method: 'POST',
+      body: JSON.stringify({ command }),
+    }),
+  runOptimization: (projectId: string, payload: {
+    product_name: string;
+    product_type: string;
+    selling_points: string[];
+    target_audience?: string;
+    offer?: string;
+    tone?: string;
+    platform?: string;
+    version?: string;
+  }) =>
+    request<{ plan: Record<string, unknown>; success: boolean }>(`/api/v1/optimize/${projectId}`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getWaveform: (projectId: string) =>
+    request<{ data: number[]; duration: number; labels: Array<{ start: number; end: number; type: string }> }>(`/api/v1/optimize/${projectId}/waveform`),
+  getThumbnail: (projectId: string, timeS: number) =>
+    request<{ thumbnail: string | null }>(`/api/v1/optimize/${projectId}/thumbnail?t=${timeS.toFixed(1)}`),
 };

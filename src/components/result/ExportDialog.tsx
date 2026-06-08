@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Button } from '../ui/Button';
 import { Modal } from '../ui/Modal';
-import type { FinalScript, RenderResolution, RenderVersion } from '../../shared/types';
+import type { FinalScript, RenderVersion } from '../../shared/types';
 
 interface ExportDialogProps {
   open: boolean;
@@ -10,67 +10,103 @@ interface ExportDialogProps {
   outputUrl: string | null;
   script: FinalScript | null;
   defaultVersion: RenderVersion;
+  renderDisabled?: boolean;
+  renderDisabledReason?: string;
   onClose: () => void;
-  onExport: (version: RenderVersion, resolution: RenderResolution) => void;
+  onExport: (version: RenderVersion, resolution: string) => void;
   onDownloadJson: () => void;
   onDownloadSrt: () => void;
 }
 
-export function ExportDialog({ open, isExporting, progress, outputUrl, script, defaultVersion, onClose, onExport, onDownloadJson, onDownloadSrt }: ExportDialogProps) {
-  const [resolution, setResolution] = useState<RenderResolution>('1080p');
-  const [version, setVersion] = useState<RenderVersion>(defaultVersion);
+export function ExportDialog({ open, isExporting, progress, outputUrl, script, defaultVersion, renderDisabled = false, renderDisabledReason, onClose, onExport, onDownloadJson, onDownloadSrt }: ExportDialogProps) {
+  const [exportStarted, setExportStarted] = useState(false);
+
+  const handleExport = () => {
+    setExportStarted(true);
+    onExport(defaultVersion, '1080p');
+  };
+
+  const handleClose = () => {
+    if (!isExporting) {
+      setExportStarted(false);
+      onClose();
+    }
+  };
+
   return (
     <Modal
       open={open}
-      title={'\u5bfc\u51fa\u7ed3\u679c'}
-      onClose={onClose}
+      title="导出视频"
+      onClose={handleClose}
       footer={
-        <>
-          <Button variant="ghost" onClick={onClose}>{'\u53d6\u6d88'}</Button>
-          <Button variant="primary" onClick={() => onExport(version, resolution)} disabled={isExporting}>{isExporting ? '\u6b63\u5728\u751f\u6210...' : '\u5f00\u59cb\u5bfc\u51fa'}</Button>
-        </>
+        !exportStarted ? (
+          <>
+            <Button variant="ghost" onClick={handleClose}>取消</Button>
+            <Button variant="primary" onClick={handleExport} disabled={renderDisabled}>
+              导出 MP4 视频
+            </Button>
+          </>
+        ) : outputUrl ? (
+          <Button variant="ghost" onClick={handleClose}>关闭</Button>
+        ) : null
       }
     >
       <div className="space-y-4">
-        <label className="block text-sm font-semibold">
-          {'\u7248\u672c'}
-          <select value={version} onChange={(event) => setVersion(event.target.value as RenderVersion)} className="mt-2 h-11 w-full rounded-lg border border-border bg-card px-3 outline-none focus:border-primary focus:ring-2 focus:ring-primary/30">
-            <option value="original">{'\u539f\u7248'}</option>
-            <option value="safe_fix">{'\u4fdd\u5b88\u4fee\u590d'}</option>
-            <option value="strong_hook">{'Strong Hook'}</option>
-            <option value="strong_conversion">{'\u5f3a\u8f6c\u5316'}</option>
-          </select>
-        </label>
-        <label className="block text-sm font-semibold">
-          MP4
-          <select value={resolution} onChange={(event) => setResolution(event.target.value as RenderResolution)} className="mt-2 h-11 w-full rounded-lg border border-border bg-card px-3 outline-none focus:border-primary focus:ring-2 focus:ring-primary/30">
-            <option value="720p">720p</option>
-            <option value="1080p">1080p</option>
-          </select>
-        </label>
-        <div className="rounded-lg border border-border bg-sidebar/40 p-3">
-          <p className="text-sm font-semibold">{'\u811a\u672c\u8d44\u4ea7'}</p>
-          <p className="mt-1 text-xs text-text-secondary">{'\u4e0b\u8f7d\u5f53\u524d\u5df2\u751f\u6210\u811a\u672c\u7684\u7ed3\u6784\u6570\u636e\u4e0e\u5b57\u5e55\u3002'}</p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Button variant="secondary" size="sm" onClick={onDownloadJson} disabled={!script}>{'\u4e0b\u8f7d\u811a\u672c JSON'}</Button>
-            <Button variant="secondary" size="sm" onClick={onDownloadSrt} disabled={!script}>{'\u4e0b\u8f7d\u5b57\u5e55 SRT'}</Button>
+        {!exportStarted ? (
+          <>
+            <p className="text-sm text-text-secondary">
+              将生成 1080p 竖屏视频，自动包含字幕和背景音乐。
+            </p>
+            {renderDisabled && renderDisabledReason ? (
+              <p className="rounded-lg border border-warning/40 bg-warning-muted p-3 text-sm text-text-secondary">{renderDisabledReason}</p>
+            ) : null}
+          </>
+        ) : isExporting ? (
+          <div className="space-y-3">
+            <p className="text-sm font-medium text-text-primary">
+              {progress > 0 && progress < 100
+                ? `正在渲染分镜 ${Math.max(1, Math.round(progress / 20))}/5...`
+                : progress === 0
+                  ? '正在启动渲染引擎...'
+                  : '正在完成渲染...'}
+            </p>
+            <div className="flex justify-between text-xs text-text-secondary">
+              <span>进度</span>
+              <span>{progress > 0 ? `${Math.round(progress)}%` : '准备中'}</span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-border">
+              <div
+                className="progress-shimmer h-full rounded-full transition-all duration-700"
+                style={{ width: `${Math.max(progress, 5)}%` }}
+              />
+            </div>
           </div>
-        </div>
-        {isExporting ? (
-          <div className="rounded-lg border border-border bg-sidebar p-3">
-            <div className="flex justify-between text-sm font-semibold">
-              <span>{'\u6e32\u67d3\u8fdb\u5ea6'}</span>
-              <span>{Math.round(progress)}%</span>
-            </div>
-            <div className="mt-2 h-2 rounded-full bg-border">
-              <div className="h-full rounded-full bg-primary" style={{ width: `${progress}%` }} />
-            </div>
+        ) : outputUrl ? (
+          <div className="space-y-4 text-center">
+            <p className="text-sm font-medium text-success">视频渲染完成</p>
+            <a
+              href={outputUrl}
+              download
+              className="inline-flex min-h-11 items-center rounded-lg bg-primary px-6 text-sm font-semibold text-surface transition-colors hover:bg-primary-hover"
+            >
+              下载视频
+            </a>
           </div>
         ) : null}
-        {outputUrl ? (
-          <a href={outputUrl} className="inline-flex min-h-11 items-center rounded-lg border border-primary px-4 text-sm font-semibold text-primary hover:bg-sidebar">
-            {'\u4e0b\u8f7d\u89c6\u9891'}
-          </a>
+
+        {/* Script downloads — secondary */}
+        {script ? (
+          <div className="border-t border-border pt-4">
+            <p className="mb-2 text-xs text-text-muted">同时下载脚本文件：</p>
+            <div className="flex gap-2">
+              <button onClick={onDownloadJson} className="text-xs text-text-secondary underline underline-offset-2 hover:text-primary">
+                脚本 JSON
+              </button>
+              <button onClick={onDownloadSrt} className="text-xs text-text-secondary underline underline-offset-2 hover:text-primary">
+                字幕 SRT
+              </button>
+            </div>
+          </div>
         ) : null}
       </div>
     </Modal>

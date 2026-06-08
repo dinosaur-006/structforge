@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     whisperx_model: str = "large-v3"
     volcano_asr_endpoint: str | None = None
     volcano_asr_api_key: str | None = None
+    volcano_asr_resource_id: str = "volc.seedasr.auc"
 
     doubao_vision_endpoint: str | None = None
     doubao_vision_api_key: str | None = None
@@ -44,7 +45,22 @@ class Settings(BaseSettings):
     doubao_llm_model: str = "doubao-seed-2-0-lite"
     jimeng_image_endpoint: str | None = None
     jimeng_image_api_key: str | None = None
+    doubao_image_model: str = "doubao-seedream-5-0-260128"
+    doubao_image_api_key: str | None = None
+    doubao_video_model: str = "doubao-seedance-1-5-pro-251215"
+    remotion_service_url: str | None = None
     llm_max_attempts: int = Field(default=3, ge=1, le=10)
+    seed_demo: bool = False
+    content_safety_enabled: bool = False
+    content_safety_blocked_terms: str = ""
+    api_key: str | None = None
+    bgm_library_dir: str | None = None
+    bgm_volume: float = 0.25
+    tts_endpoint: str | None = None
+    tts_api_key: str | None = None
+    tts_voice: str = "zh_female_qingxin"
+    tts_speed: float = 1.0
+    gap_match_threshold: float = 60.0  # Lower in .env for permissive matching
 
 
 def get_settings() -> Settings:

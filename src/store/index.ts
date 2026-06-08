@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { api, ApiError } from '../services/api';
 import { mockAnalysisResult } from '../mocks/analysisResult';
+import { humanizeError } from '../shared/errorMessages';
 import { uid } from '../shared/format';
 import type {
   AnalysisSample,
@@ -41,6 +42,7 @@ function initialState() {
     projects: [] as Project[],
     videoFile: null,
     isAnalyzing: false,
+    uploadProgress: 0,
     progress: 0,
     stage: analysisStages[0],
     analysisResult: null,
@@ -68,6 +70,8 @@ function initialState() {
     renderError: null,
     isExporting: false,
     toasts: [] as ToastMessage[],
+    lastFailedAction: null as string | null,
+    lastFailedActionArgs: null as unknown[] | null,
   };
 }
 
@@ -80,6 +84,7 @@ interface AppState {
   projects: Project[];
   videoFile: File | null;
   isAnalyzing: boolean;
+  uploadProgress: number;
   progress: number;
   stage: string;
   analysisResult: VideoStructure | null;
@@ -107,6 +112,8 @@ interface AppState {
   renderError: string | null;
   isExporting: boolean;
   toasts: ToastMessage[];
+  lastFailedAction: string | null;
+  lastFailedActionArgs: unknown[] | null;
   toggleSidebar: () => void;
   setMobileSidebarOpen: (open: boolean) => void;
   setRouteLoading: (loading: boolean) => void;
@@ -135,6 +142,7 @@ interface AppState {
   undo: () => Promise<void>;
   redo: () => Promise<void>;
   resetStructure: () => Promise<void>;
+  nlEdit: (command: string) => Promise<void>;
   fixGaps: () => Promise<void>;
   migrateScript: (projectId: string, style?: FinalScriptStyle) => Promise<FinalScript | undefined>;
   loadFinalScript: (projectId: string) => Promise<void>;
@@ -145,19 +153,48 @@ interface AppState {
   exportResult: () => Promise<void>;
   addToast: (toast: Omit<ToastMessage, 'id'>) => void;
   removeToast: (id: string) => void;
+  retryLastAction: () => Promise<void>;
   resetForTest: () => void;
 }
 
 function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : '\u672a\u77e5\u9519\u8bef';
+  const raw = error instanceof Error ? error.message : '\u672a\u77e5\u9519\u8bef';
+  return humanizeError(raw);
+}
+
+function trackAction(set: (fn: (state: AppState) => Partial<AppState>) => void, actionName: string, args: unknown[]) {
+  set(() => ({ lastFailedAction: actionName, lastFailedActionArgs: args }));
+}
+
+function clearTracking(set: (fn: (state: AppState) => Partial<AppState>) => void) {
+  set(() => ({ lastFailedAction: null, lastFailedActionArgs: null }));
 }
 
 function projectNameFromFile(file: File): string {
-  return file.name.replace(/\.[^.]+$/, '') || '\u672a\u547d\u540d\u9879\u76ee';
+  const base = file.name.replace(/\.[^.]+$/, '') || '\u672a\u547d\u540d\u9879\u76ee';
+  // Don't use raw filenames as project names \u2014 they're often junk like "\u6296\u97f3202666-620593"
+  // Keep it short and recognizable, but mark clearly as user-uploaded
+  const cleaned = base.replace(/[_\-\.]+/g, ' ').trim();
+  if (cleaned.length > 20) return cleaned.slice(0, 20) + '\u2026';
+  return cleaned || '\u65b0\u89c6\u9891\u9879\u76ee';
 }
 
 function wait(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function isOnline(): boolean {
+  return typeof navigator !== 'undefined' ? navigator.onLine : true;
+}
+
+async function waitForNetwork(maxWaitMs: number = 30000): Promise<boolean> {
+  if (isOnline()) return true;
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    await wait(2000);
+    if (isOnline()) return true;
+  }
+  return false;
 }
 
 export const useAppStore = create<AppState>()(
@@ -169,6 +206,7 @@ export const useAppStore = create<AppState>()(
       setRouteLoading: (loading) => set({ routeLoading: loading }),
       fetchProjects: async () => {
         set({ routeLoading: true, apiError: null });
+        trackAction(set, 'fetchProjects', []);
         try {
           const projects = await api.listProjects();
           set({ projects });
@@ -178,6 +216,7 @@ export const useAppStore = create<AppState>()(
           get().addToast({ tone: 'error', title: '\u9879\u76ee\u52a0\u8f7d\u5931\u8d25', description: message });
         } finally {
           set({ routeLoading: false });
+          clearTracking(set);
         }
       },
       addProject: async (name, description, brief) => {
@@ -185,6 +224,7 @@ export const useAppStore = create<AppState>()(
         try {
           const project = await api.createProject({ name, description, ...(brief ? { brief } : {}) });
           set((state) => ({ projects: [project, ...state.projects], activeProjectId: project.id }));
+          get().addToast({ tone: 'success', title: '项目已创建' });
           return project.id;
         } catch (error) {
           const message = getErrorMessage(error);
@@ -246,7 +286,9 @@ export const useAppStore = create<AppState>()(
           if (!targetProjectId) throw new Error('\u9879\u76ee\u521b\u5efa\u5931\u8d25');
 
           set({ activeProjectId: targetProjectId });
+          set({ stage: '正在上传视频...', uploadProgress: 50 });
           const job = await api.startAnalysis(file, targetProjectId);
+          set({ uploadProgress: 100, stage: analysisStages[0] });
 
           for (;;) {
             const status = await api.getAnalysis(job.job_id);
@@ -270,6 +312,18 @@ export const useAppStore = create<AppState>()(
           }
         } catch (error) {
           const message = getErrorMessage(error);
+          // Auto-recovery: if offline, wait for network and retry.
+          if (!isOnline()) {
+            get().addToast({ tone: 'info', title: '\u7f51\u7edc\u5df2\u65ad\u5f00', description: '\u68c0\u6d4b\u5230\u7f51\u7edc\u6062\u590d\u540e\u5c06\u81ea\u52a8\u91cd\u8bd5' });
+            const recovered = await waitForNetwork();
+            if (recovered) {
+              get().addToast({ tone: 'success', title: '\u7f51\u7edc\u5df2\u6062\u590d', description: '\u6b63\u5728\u81ea\u52a8\u91cd\u8bd5...' });
+              set({ isAnalyzing: true, progress: 0 });
+              // Retry by recursing
+              void get().startAnalysis(projectId);
+              return undefined;
+            }
+          }
           set({ isAnalyzing: false, apiError: message });
           get().addToast({ tone: 'error', title: '\u5206\u6790\u5931\u8d25', description: message });
           return undefined;
@@ -410,6 +464,12 @@ export const useAppStore = create<AppState>()(
             assets: response.assets ?? get().assets,
             gaps: response.gaps,
           });
+          const openCount = (response.gaps ?? []).filter((g) => g.status === 'open').length;
+          if (openCount === 0) {
+            get().addToast({ tone: 'success', title: '\u7d20\u6750\u7f3a\u53e3\u5df2\u5168\u90e8\u8865\u5168', description: '\u7ed3\u6784\u5df2\u5c31\u7eea\uff0c\u70b9\u51fb\u5e95\u90e8\u6309\u94ae\u751f\u6210\u811a\u672c' });
+          } else {
+            get().addToast({ tone: 'info', title: `\u5df2\u4fee\u590d\uff0c\u5269\u4f59 ${openCount} \u4e2a\u7f3a\u53e3`, description: '\u53ef\u7ee7\u7eed\u8865\u5168\u6216\u76f4\u63a5\u751f\u6210\u811a\u672c' });
+          }
         } catch (error) {
           const message = getErrorMessage(error);
           set({ apiError: message });
@@ -492,6 +552,24 @@ export const useAppStore = create<AppState>()(
           set({ currentStructure, gaps: gapResponse.gaps });
         } catch (error) {
           get().addToast({ tone: 'error', title: '\u91cd\u7f6e\u5931\u8d25', description: getErrorMessage(error) });
+        }
+      },
+      nlEdit: async (command) => {
+        const projectId = get().activeProjectId;
+        if (!projectId || !command.trim()) return;
+        set({ routeLoading: true, apiError: null });
+        try {
+          const response = await api.nlEditStructure(projectId, command.trim());
+          set({ currentStructure: response.structure });
+          await get().fetchGaps(projectId);
+          get().addToast({ tone: 'success', title: '\u5df2\u5e94\u7528\u7f16\u8f91', description: response.changes_summary });
+        } catch (error) {
+          const message = getErrorMessage(error);
+          set({ apiError: message });
+          get().addToast({ tone: 'error', title: '\u81ea\u7136\u8bed\u8a00\u7f16\u8f91\u5931\u8d25', description: message });
+          throw error;
+        } finally {
+          set({ routeLoading: false });
         }
       },
       fixGaps: () => get().fixAllGaps(),
@@ -586,7 +664,9 @@ export const useAppStore = create<AppState>()(
             }
             if (status.status === 'failed') {
               const message = status.error || '\u89c6\u9891\u6e32\u67d3\u5931\u8d25';
-              set({ isExporting: false, renderError: message });
+              console.error('[StructForge] Render failed:', message, 'warnings:', status.warnings);
+              try { sessionStorage.setItem('lastRenderError', JSON.stringify({ error: message, warnings: status.warnings })); } catch {}
+              set({ isExporting: false, renderError: message, renderStatus: 'failed' });
               get().addToast({ tone: 'error', title: '\u6e32\u67d3\u5931\u8d25', description: message });
               return;
             }
@@ -614,6 +694,19 @@ export const useAppStore = create<AppState>()(
         window.setTimeout(() => get().removeToast(id), 3500);
       },
       removeToast: (id) => set((state) => ({ toasts: state.toasts.filter((toast) => toast.id !== id) })),
+      retryLastAction: async () => {
+        const { lastFailedAction, lastFailedActionArgs } = get();
+        if (!lastFailedAction) return;
+        const action = (get() as unknown as Record<string, unknown>)[lastFailedAction];
+        if (typeof action === 'function') {
+          set({ apiError: null, routeLoading: true });
+          try {
+            await (action as (...args: unknown[]) => Promise<void>)(...(lastFailedActionArgs ?? []));
+          } finally {
+            set({ routeLoading: false });
+          }
+        }
+      },
       resetForTest: () => set(initialState()),
     }),
     {

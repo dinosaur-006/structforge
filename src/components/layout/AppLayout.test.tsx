@@ -14,7 +14,7 @@ describe('AppLayout', () => {
         </Routes>
       </MemoryRouter>,
     );
-    expect(screen.getByText('StructForge')).toBeInTheDocument();
+    expect(screen.getByText('Struct')).toBeInTheDocument();
     expect(screen.getByText('Projects body')).toBeInTheDocument();
   });
 });

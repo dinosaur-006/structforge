@@ -14,6 +14,7 @@ import { downloadJson, safeFileStem } from '../shared/download';
 import type { Capabilities } from '../shared/types';
 import { api } from '../services/api';
 import { useAppStore } from '../store';
+import { WorkflowSteps } from '../components/layout/WorkflowSteps';
 
 export default function AnalyzePage() {
   const navigate = useNavigate();
@@ -69,26 +70,27 @@ export default function AnalyzePage() {
     setSelectedSamples([]);
   };
 
+  if (isAnalyzing && !analysisResult) {
+    return (
+      <section className="mx-auto max-w-[1240px] space-y-6">
+        <WorkflowSteps current="analyze" projectId={activeProjectId ?? projectId} />
+        <SectionHeader title={copy.analyzeTitle} description={copy.analyzeSubtitle} />
+        {isAnalyzing ? <AnalysisProgress progress={progress} stage={stage} /> : null}
+      </section>
+    );
+  }
+
   return (
     <section className="mx-auto max-w-[1240px] space-y-6">
+      <WorkflowSteps current="analyze" projectId={activeProjectId ?? projectId} />
       <SectionHeader
         title={copy.analyzeTitle}
         description={copy.analyzeSubtitle}
         action={
-          <div className="flex flex-wrap gap-3">
-            <Button
-              variant="secondary"
-              disabled={!analysisResult}
-              onClick={() => analysisResult && downloadJson(`${safeFileStem(currentProject?.name ?? 'structforge')}-analysis.json`, analysisResult)}
-            >
-              <Download className="h-4 w-4" />
-              {copy.exportJson}
-            </Button>
-            <Button variant="primary" onClick={goNext} disabled={!analysisResult}>
-              {copy.nextStep}
-              <MoveRight className="h-4 w-4" />
-            </Button>
-          </div>
+          <Button variant="primary" onClick={goNext} disabled={!analysisResult}>
+            {copy.nextStep}
+            <MoveRight className="h-4 w-4" />
+          </Button>
         }
       />
 
@@ -102,13 +104,35 @@ export default function AnalyzePage() {
         disabled={isAnalyzing}
       />
       {isAnalyzing ? <AnalysisProgress progress={progress} stage={stage} /> : null}
-      {analysisSamples.length ? (
+      {analysisSamples.length >= 2 ? (
         <SampleComparison samples={analysisSamples} onSelect={(jobId) => void selectReferenceSample(activeProjectId ?? projectId ?? '', jobId)} />
       ) : null}
       {analysisResult ? (
         <div className="space-y-5">
+          {/* ── Analysis complete: prompt to continue ── */}
+          <div className="flex items-center justify-between rounded-lg border border-success/30 bg-success/5 px-5 py-4">
+            <div>
+              <p className="font-semibold text-success">AI 分析完成</p>
+              <p className="text-sm text-text-secondary">结构拆解、脚本提取、健康度评估已完成，点击继续进入 AI 自动优化</p>
+            </div>
+            <Button variant="primary" onClick={goNext}>
+              {copy.nextStep}
+              <MoveRight className="h-4 w-4" />
+            </Button>
+          </div>
+
           <VideoInfoCard structure={analysisResult} />
-          <StructureTabs structure={analysisResult} />
+          <StructureTabs structure={analysisResult} jobId={analysisSamples[0]?.job_id} />
+          <div className="flex justify-end">
+            <button
+              type="button"
+              className="text-sm text-text-secondary underline underline-offset-2 hover:text-primary transition-colors"
+              onClick={() => downloadJson(`${safeFileStem(currentProject?.name ?? 'structforge')}-analysis.json`, analysisResult)}
+            >
+              <Download className="mr-1 inline h-3.5 w-3.5" />
+              导出结构 JSON
+            </button>
+          </div>
         </div>
       ) : null}
     </section>

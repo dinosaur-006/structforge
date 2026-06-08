@@ -149,6 +149,15 @@ export interface ResultTimelineSegment {
   start: number;
   end: number;
   source: SourceType;
+  thumbnailUrl?: string | null;
+  subtitle?: string | null;
+  script?: string | null;
+}
+
+export interface WaveformData {
+  data: number[];
+  duration: number;
+  labels: Array<{ start: number; end: number; type: string }>;
 }
 
 export interface FinalSegment {
@@ -164,6 +173,8 @@ export interface FinalSegment {
   transition: string;
   locked: boolean;
   source: SourceType;
+  source_start?: number | null;
+  source_end?: number | null;
 }
 
 export interface FinalScript {

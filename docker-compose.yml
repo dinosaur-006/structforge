@@ -22,6 +22,7 @@ services:
       STRUCTFORGE_DOUBAO_VISION_API_KEY: ${STRUCTFORGE_DOUBAO_VISION_API_KEY:-}
       STRUCTFORGE_JIMENG_IMAGE_ENDPOINT: ${STRUCTFORGE_JIMENG_IMAGE_ENDPOINT:-}
       STRUCTFORGE_JIMENG_IMAGE_API_KEY: ${STRUCTFORGE_JIMENG_IMAGE_API_KEY:-}
+      STRUCTFORGE_SEED_DEMO: ${STRUCTFORGE_SEED_DEMO:-true}
     depends_on:
       - redis
     volumes:
@@ -35,6 +36,17 @@ services:
       - redis
     volumes:
       - ./data:/data
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "80:80"
+    environment:
+      VITE_API_BASE_URL: ""
+    depends_on:
+      - api
 
 volumes:
   redis-data:

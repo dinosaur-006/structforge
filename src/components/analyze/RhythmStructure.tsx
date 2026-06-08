@@ -1,7 +1,21 @@
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { RhythmPoint } from '../../shared/types';
 
+function rhythmStats(data: RhythmPoint[]) {
+  if (!data.length) return { avgShot: '--', peakPos: '--', peakEmotion: '--' };
+  const totalCuts = data.reduce((s, p) => s + p.cuts, 0);
+  const totalSeconds = Math.max(data[data.length - 1].second - data[0].second, 1);
+  const avgInterval = totalCuts > 0 ? totalSeconds / totalCuts : 0;
+  const peak = data.reduce((best, p) => (p.emotion > best.emotion ? p : best), data[0]);
+  return {
+    avgShot: `${avgInterval.toFixed(1)}s`,
+    peakPos: `${peak.second.toFixed(1)}s`,
+    peakEmotion: peak.emotion.toFixed(2),
+  };
+}
+
 export function RhythmStructure({ data }: { data: RhythmPoint[] }) {
+  const stats = rhythmStats(data);
   return (
     <div className="grid gap-4 xl:grid-cols-[1fr,260px]">
       <div className="min-h-[280px] rounded-lg border border-border bg-card p-4 shadow-sm">
@@ -23,9 +37,9 @@ export function RhythmStructure({ data }: { data: RhythmPoint[] }) {
       </div>
       <div className="grid gap-4">
         {[
-          ['\u5e73\u5747\u955c\u5934\u65f6\u957f', '2.2s'],
-          ['\u9ad8\u6f6e\u4f4d\u7f6e', '18.0s'],
-          ['\u60c5\u7eea\u5cf0\u503c', '0.92'],
+          ['\u5e73\u5747\u955c\u5934\u95f4\u9694', stats.avgShot],
+          ['\u9ad8\u6f6e\u4f4d\u7f6e', stats.peakPos],
+          ['\u60c5\u7eea\u5cf0\u503c', stats.peakEmotion],
         ].map(([label, value]) => (
           <div key={label} className="rounded-lg border border-border bg-card p-4 shadow-sm">
             <p className="text-sm text-text-secondary">{label}</p>

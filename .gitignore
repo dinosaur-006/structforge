@@ -44,6 +44,9 @@ data/demo-cases/*
 !data/outputs/.gitkeep
 !data/demo-cases/.gitkeep
 
+# AI service local data (database, cache, uploads)
+ai-services/data/
+
 # Local verification artifacts
 ai-services/test_video.mp4
 
