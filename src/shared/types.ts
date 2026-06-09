@@ -6,7 +6,7 @@ export type AssetOrigin = 'uploaded' | 'packaging' | 'aigc' | 'recompose';
 export type HealthTone = 'success' | 'warning' | 'error';
 export type GapSeverity = 'critical' | 'warning';
 export type GapStatus = 'open' | 'fixed';
-export type SourceType = 'original' | 'reorder' | 'aigc' | 'packaging' | 'recompose';
+export type SourceType = 'original' | 'reorder' | 'aigc' | 'packaging' | 'recompose' | 'aigc_draft';
 export type FinalScriptStyle = 'high_click' | 'high_conversion' | 'fast_pace' | 'high_quality' | 'default';
 export type RenderVersion = 'original' | 'safe_fix' | 'strong_hook' | 'strong_conversion';
 export type RenderStatus = 'idle' | 'pending' | 'processing' | 'completed' | 'failed';
@@ -221,4 +221,38 @@ export interface ToastMessage {
   tone: 'success' | 'error' | 'info';
   title: string;
   description?: string;
+}
+
+// ── Blueprint / Pre-viz Payload types ──
+
+export interface BlueprintSegmentPayload {
+  segment_id: string;
+  segment_type: string;
+  segment_label: string;
+  duration: number;
+  visual_prompt: string;
+  script_text: string;
+  camera: string;
+  visual_fx: string;
+  pace: string;
+  emotion: string;
+  model: string;
+  estimated_tokens: number;
+  estimated_cost_usd: number;
+  api_provider: string;
+  is_available: boolean;
+  api_payload: Record<string, unknown>;
+}
+
+export interface BlueprintPayloadsResponse {
+  project_id: string;
+  video_gen_available: boolean;
+  payloads: BlueprintSegmentPayload[];
+  total_estimated_cost_usd: number;
+  total_estimated_tokens: number;
+}
+
+export interface ApiCapabilitiesState {
+  videoGen: boolean;
+  loaded: boolean;
 }

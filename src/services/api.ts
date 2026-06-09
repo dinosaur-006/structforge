@@ -157,6 +157,28 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const errorMessage = await extractErrorMessage(response);
     const error = new ApiError(errorMessage, response.status);
 
+    // ── LLM Outage detection ──
+    // When the backend returns 503 with the "llm_unavailable" error code,
+    // the core AI engine is down. Show the interruption panel immediately
+    // rather than treating this as a generic error toast.
+    if (response.status === 503) {
+      try {
+        const body = await response.clone().json().catch(() => ({}));
+        if (body?.error === 'llm_unavailable') {
+          // Dynamically import store to avoid circular dependency
+          const { useAppStore } = await import('../store');
+          useAppStore.getState().setLLMOutage({
+            operation: _inferOperation(path, method),
+            error: (body?.message as string) || 'LLM 服务不可用',
+            suggestion: (body?.suggestion as string) || '',
+            retryable: body?.retryable !== false,
+          });
+        }
+      } catch {
+        // If parsing fails, fall through to normal error handling
+      }
+    }
+
     if (attempt < MAX_RETRIES && shouldRetry(method, response.status)) {
       const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
       await new Promise((resolve) => setTimeout(resolve, delay));
@@ -168,6 +190,16 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
 
   throw lastError ?? new ApiError('Request failed', 0);
+}
+
+function _inferOperation(path: string, method: string): string {
+  if (path.includes('/analyze')) return '视频分析';
+  if (path.includes('/migrate') && method === 'POST') return '脚本迁移';
+  if (path.includes('/nl-edit')) return '自然语言编辑';
+  if (path.includes('/optimize') && method === 'POST') return '流水线优化';
+  if (path.includes('/audit')) return '爆款审计';
+  if (path.includes('/structure')) return '结构编辑';
+  return 'AI 处理';
 }
 
 async function extractErrorMessage(response: Response): Promise<string> {
@@ -260,4 +292,6 @@ export const api = {
     request<{ data: number[]; duration: number; labels: Array<{ start: number; end: number; type: string }> }>(`/api/v1/optimize/${projectId}/waveform`),
   getThumbnail: (projectId: string, timeS: number) =>
     request<{ thumbnail: string | null }>(`/api/v1/optimize/${projectId}/thumbnail?t=${timeS.toFixed(1)}`),
+  getBlueprintPayloads: (projectId: string) =>
+    request<import('../shared/types').BlueprintPayloadsResponse>(`/api/v1/optimize/${projectId}/blueprint-payloads`),
 };

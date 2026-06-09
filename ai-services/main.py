@@ -2,8 +2,14 @@ from __future__ import annotations
 
 import importlib.util
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse, StreamingResponse
+import json as _json_module
+
+
+class UTF8JSONResponse(JSONResponse):
+    def render(self, content) -> bytes:
+        return _json_module.dumps(content, ensure_ascii=False, allow_nan=False).encode("utf-8")
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -39,7 +45,7 @@ def create_app() -> FastAPI:
     # Auto-seed a demo project on first startup when enabled.
     seed_if_empty(settings)
 
-    app = FastAPI(title="StructForge AI Services", version="0.1.0")
+    app = FastAPI(title="StructForge AI Services", version="0.1.0", default_response_class=UTF8JSONResponse)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
@@ -58,6 +64,18 @@ def create_app() -> FastAPI:
     from services.auth import APIKeyMiddleware
     if settings.api_key:
         app.add_middleware(APIKeyMiddleware, api_key=settings.api_key)
+
+    # ── Global exception handler for LLM failures ──
+    from services.llm_client import LLMError
+
+    @app.exception_handler(LLMError)
+    async def llm_error_handler(request: Request, exc: LLMError) -> JSONResponse:
+        """Catch LLMError and return structured 503 so the frontend can show LLMOutagePanel."""
+        return JSONResponse(
+            status_code=503,
+            content=exc.to_dict(),
+        )
+
     app.include_router(build_projects_router(repository, settings))
     app.include_router(build_structure_router(repository, settings))
     app.include_router(build_assets_router(repository, settings))
@@ -142,6 +160,62 @@ def create_app() -> FastAPI:
                 "detail": "本地同步任务模式" if settings.celery_task_always_eager else "Redis / Celery 异步任务模式",
             },
         )
+
+    @app.get(f"{API_PREFIX}/diagnostics/llm")
+    async def llm_diagnostics() -> dict[str, object]:
+        """Active LLM connectivity test — pings the configured endpoint with a minimal prompt."""
+        import time as _time
+        import httpx as _httpx
+
+        endpoint = settings.doubao_llm_endpoint
+        api_key = settings.doubao_llm_api_key
+        model = settings.doubao_llm_model
+
+        if not endpoint or not api_key:
+            return {
+                "status": "unconfigured",
+                "endpoint": endpoint or "(not set)",
+                "message": "LLM endpoint or API key not configured. Set STRUCTFORGE_DOUBAO_LLM_ENDPOINT and STRUCTFORGE_DOUBAO_LLM_API_KEY in .env",
+            }
+
+        t0 = _time.monotonic()
+        try:
+            resp = _httpx.post(
+                endpoint,
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={"model": model, "messages": [{"role": "user", "content": "回复 ok"}], "max_tokens": 4},
+                timeout=settings.llm_timeout_seconds,
+            )
+            elapsed = round(_time.monotonic() - t0, 2)
+            resp.raise_for_status()
+            return {
+                "status": "healthy",
+                "endpoint": endpoint,
+                "model": model,
+                "latency_seconds": elapsed,
+                "timeout_seconds": settings.llm_timeout_seconds,
+                "message": f"LLM responded in {elapsed}s",
+            }
+        except _httpx.ReadTimeout:
+            elapsed = round(_time.monotonic() - t0, 2)
+            return {
+                "status": "timeout",
+                "endpoint": endpoint,
+                "model": model,
+                "latency_seconds": elapsed,
+                "timeout_seconds": settings.llm_timeout_seconds,
+                "message": f"LLM timed out after {elapsed}s (limit: {settings.llm_timeout_seconds}s). Consider increasing STRUCTFORGE_LLM_TIMEOUT_SECONDS or checking network.",
+            }
+        except Exception as exc:
+            elapsed = round(_time.monotonic() - t0, 2)
+            return {
+                "status": "error",
+                "endpoint": endpoint,
+                "model": model,
+                "latency_seconds": elapsed,
+                "error": str(exc),
+                "message": f"LLM connectivity test failed: {exc}",
+            }
 
     @app.post(f"{API_PREFIX}/analyze", response_model=AnalyzeResponse)
     async def analyze_video(

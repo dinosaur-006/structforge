@@ -93,6 +93,8 @@ class HighlightDetector:
                 vision_lines.append(f"  帧{idx}: {desc}")
         vision_summary = "\n".join(vision_lines) if vision_lines else "无画面描述"
 
+        from services.llm_client import LightLLMClient
+
         prompt = HIGHLIGHT_PROMPT.format(
             duration=f"{duration:.0f}",
             rhythm_summary=rhythm_summary,
@@ -100,19 +102,8 @@ class HighlightDetector:
             vision_summary=vision_summary,
         )
         try:
-            response = httpx.post(
-                self._endpoint,
-                headers={"Authorization": f"Bearer {self._api_key}"},
-                json={
-                    "model": self._model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 512,
-                },
-                timeout=30,
-            )
-            response.raise_for_status()
-            payload = response.json()
-            content = _extract_content(payload)
+            client = LightLLMClient(self._endpoint, self._api_key, self._model)
+            content = client.complete_json(prompt, max_tokens=512)
             if isinstance(content, str):
                 content = json.loads(content)
             highlights = content.get("highlights", []) if isinstance(content, dict) else []

@@ -6,7 +6,9 @@ import { humanizeError } from '../shared/errorMessages';
 import { uid } from '../shared/format';
 import type {
   AnalysisSample,
+  ApiCapabilitiesState,
   Asset,
+  BlueprintPayloadsResponse,
   FinalScript,
   FinalScriptStyle,
   MaterialGap,
@@ -72,6 +74,11 @@ function initialState() {
     toasts: [] as ToastMessage[],
     lastFailedAction: null as string | null,
     lastFailedActionArgs: null as unknown[] | null,
+    apiCapabilities: { videoGen: false, loaded: false } as ApiCapabilitiesState,
+    blueprintPayloads: null as BlueprintPayloadsResponse | null,
+    blueprintLoading: false,
+    selectedBlueprintId: null as string | null,
+    llmOutage: null as { operation: string; error: string; suggestion: string; retryable: boolean } | null,
   };
 }
 
@@ -114,6 +121,15 @@ interface AppState {
   toasts: ToastMessage[];
   lastFailedAction: string | null;
   lastFailedActionArgs: unknown[] | null;
+  apiCapabilities: ApiCapabilitiesState;
+  blueprintPayloads: BlueprintPayloadsResponse | null;
+  blueprintLoading: boolean;
+  selectedBlueprintId: string | null;
+  llmOutage: { operation: string; error: string; suggestion: string; retryable: boolean } | null;
+  setLLMOutage: (outage: { operation: string; error: string; suggestion: string; retryable: boolean } | null) => void;
+  fetchCapabilities: () => Promise<void>;
+  fetchBlueprintPayloads: (projectId: string) => Promise<void>;
+  selectBlueprint: (segmentId: string | null) => void;
   toggleSidebar: () => void;
   setMobileSidebarOpen: (open: boolean) => void;
   setRouteLoading: (loading: boolean) => void;
@@ -171,12 +187,17 @@ function clearTracking(set: (fn: (state: AppState) => Partial<AppState>) => void
 }
 
 function projectNameFromFile(file: File): string {
-  const base = file.name.replace(/\.[^.]+$/, '') || '\u672a\u547d\u540d\u9879\u76ee';
-  // Don't use raw filenames as project names \u2014 they're often junk like "\u6296\u97f3202666-620593"
-  // Keep it short and recognizable, but mark clearly as user-uploaded
-  const cleaned = base.replace(/[_\-\.]+/g, ' ').trim();
-  if (cleaned.length > 20) return cleaned.slice(0, 20) + '\u2026';
-  return cleaned || '\u65b0\u89c6\u9891\u9879\u76ee';
+  let base = file.name.replace(/\.[^.]+$/, '') || '\u672a\u547d\u540d\u9879\u76ee';
+  // Strip TikTok/YouTube ID patterns: "\u6296\u97f3202668 241811" \u2192 "\u6296\u97f3\u89c6\u9891"
+  // These are platform-generated filenames, not product names
+  base = base
+    .replace(/^\u6296\u97f3\d{4,}\s*\d{4,}$/, '\u6296\u97f3\u89c6\u9891')
+    .replace(/^[a-zA-Z]+\d{6,}$/, '\u5bfc\u5165\u89c6\u9891')
+    .replace(/^\d{10,}$/, '\u5bfc\u5165\u89c6\u9891')
+    .replace(/[_\-\.]+/g, ' ')
+    .trim();
+  if (base.length > 20) base = base.slice(0, 20) + '\u2026';
+  return base || '\u65b0\u89c6\u9891\u9879\u76ee';
 }
 
 function wait(ms: number) {
@@ -202,6 +223,31 @@ export const useAppStore = create<AppState>()(
     (set, get) => ({
       ...initialState(),
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
+      setLLMOutage: (outage) => set({ llmOutage: outage }),
+      fetchCapabilities: async () => {
+        try {
+          const caps = await api.getCapabilities();
+          set({
+            apiCapabilities: {
+              videoGen: caps.aigc?.state === 'configured',
+              loaded: true,
+            },
+          });
+        } catch {
+          // If capabilities endpoint is unavailable, assume fallback
+          set({ apiCapabilities: { videoGen: false, loaded: true } });
+        }
+      },
+      fetchBlueprintPayloads: async (projectId) => {
+        set({ blueprintLoading: true });
+        try {
+          const data = await api.getBlueprintPayloads(projectId);
+          set({ blueprintPayloads: data, blueprintLoading: false });
+        } catch {
+          set({ blueprintPayloads: null, blueprintLoading: false });
+        }
+      },
+      selectBlueprint: (segmentId) => set({ selectedBlueprintId: segmentId }),
       setMobileSidebarOpen: (open) => set({ mobileSidebarOpen: open }),
       setRouteLoading: (loading) => set({ routeLoading: loading }),
       fetchProjects: async () => {

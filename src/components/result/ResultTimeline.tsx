@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { sourceMeta } from '../../shared/status';
 import type { ResultTimelineSegment, WaveformData } from '../../shared/types';
-import { SourceLegend } from '../ui/SourceLegend';
 import { WaveformOverlay } from './WaveformOverlay';
 
 interface ResultTimelineProps {
@@ -86,9 +85,9 @@ export function ResultTimeline({ segments, waveform, currentTime, onSeek, onTrim
 
   return (
     <section className="rounded-lg border border-border bg-card shadow-sm overflow-hidden">
-      {/* Header */}
+      {/* Header — smart legend: only show types actually present */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-border">
-        <SourceLegend items={Object.values(sourceMeta).map((m) => ({ color: m.color, label: m.label }))} />
+        <SmartLegend segments={segments} />
         {onTrim && (
           <span className="text-[10px] text-text-muted">拖拽分镜边缘可调整时长</span>
         )}
@@ -199,41 +198,77 @@ function SegmentBlock({
   onHover?: () => void;
 }) {
   const [imgError, setImgError] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const isDraft = segment.source === 'aigc_draft';
 
   return (
     <button
       type="button"
-      className="relative group rounded overflow-hidden transition-transform hover:scale-[1.02] hover:z-10 focus-visible:ring-2 focus-visible:ring-primary/50"
+      className="relative group rounded-sm overflow-hidden transition-all hover:scale-[1.02] hover:z-10 focus-visible:ring-2 focus-visible:ring-primary/50"
       style={{
         width: `${widthPct}%`,
         minWidth: 28,
         backgroundColor: '#1a1a2e',
       }}
       onClick={onSeek}
-      onMouseEnter={onHover}
+      onMouseEnter={() => { onHover?.(); setHovered(true); }}
+      onMouseLeave={() => setHovered(false)}
     >
+      {/* ── LEFT color bar (4px, always visible) ── */}
+      <div
+        className="absolute left-0 top-0 bottom-0 w-[4px] z-10"
+        style={{ backgroundColor: meta.color }}
+      />
+
+      {/* Draft diagonal-stripe pattern overlay */}
+      {isDraft && (
+        <div
+          className="absolute inset-0 opacity-20 pointer-events-none"
+          style={{
+            backgroundImage: 'repeating-linear-gradient(-45deg, transparent, transparent 6px, rgba(255,179,0,0.15) 6px, rgba(255,179,0,0.15) 8px)',
+          }}
+        />
+      )}
+
       {/* Thumbnail background */}
       {thumbnailUrl && !imgError ? (
         <img
           src={thumbnailUrl}
           alt=""
-          className="absolute inset-0 w-full h-full object-cover opacity-70 group-hover:opacity-90 transition-opacity"
+          className="absolute inset-0 w-full h-full object-cover opacity-60 group-hover:opacity-85 transition-opacity"
           onError={() => setImgError(true)}
           loading="lazy"
         />
       ) : null}
 
-      {/* Type badge */}
+      {/* Type badge (segment type, top-left) */}
       <span
-        className="absolute top-1 left-1 text-[10px] font-bold px-1.5 py-0.5 rounded"
-        style={{ backgroundColor: 'rgba(0,0,0,0.65)', color: '#fff' }}
+        className="absolute top-1.5 left-[7px] text-[10px] font-bold px-1.5 py-0.5 rounded z-10"
+        style={{ backgroundColor: 'rgba(0,0,0,0.7)', color: '#fff' }}
       >
         {segment.label.slice(0, 6)}
       </span>
 
-      {/* Source color bar */}
+      {/* Source badge (top-right, shows on hover or always for non-original) */}
+      {(hovered || segment.source !== 'original') && (
+        <span
+          className="absolute top-1.5 right-1.5 text-[9px] font-medium px-1.5 py-0.5 rounded z-10 flex items-center gap-1"
+          style={{
+            backgroundColor: `${meta.color}22`,
+            color: meta.color,
+            border: `1px solid ${meta.color}44`,
+          }}
+        >
+          {isDraft && (
+            <span className="inline-block w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: meta.color }} />
+          )}
+          {meta.label}
+        </span>
+      )}
+
+      {/* BOTTOM color bar (5px, always visible) */}
       <div
-        className="absolute bottom-0 left-0 right-0 h-[3px]"
+        className="absolute bottom-0 left-0 right-0 h-[5px] z-10"
         style={{ backgroundColor: meta.color }}
       />
 
@@ -266,7 +301,7 @@ function loadThumbnail(
   const projectId = window.location.pathname.split('/').pop() || '';
   if (!projectId) return;
 
-  const url = `${API_BASE_URL}/api/v1/optimize/${projectId}/thumbnail/${seg.start.toFixed(1)}`;
+  const url = `${API_BASE_URL}/api/v1/optimize/${projectId}/thumbnail?t=${seg.start.toFixed(1)}`;
   fetch(url)
     .then((r) => r.json())
     .then((data) => {
@@ -275,4 +310,42 @@ function loadThumbnail(
       }
     })
     .catch(() => {});
+}
+
+// ── Smart Legend: only shows types actually in use ──
+
+function SmartLegend({ segments }: { segments: ResultTimelineSegment[] }) {
+  const counts = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const seg of segments) {
+      const key = seg.source || 'original';
+      map[key] = (map[key] || 0) + 1;
+    }
+    return map;
+  }, [segments]);
+
+  const usedTypes = Object.entries(counts);
+  const hasAssets = usedTypes.some(([k]) => k !== 'original');
+  const allSameType = usedTypes.length <= 1;
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+      {usedTypes.map(([key, count]) => {
+        const meta = sourceMeta[key as keyof typeof sourceMeta];
+        if (!meta) return null;
+        return (
+          <span key={key} className="inline-flex items-center gap-1.5 text-xs font-medium text-text-secondary">
+            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: meta.color }} />
+            {meta.label}
+            <span className="text-[10px] text-text-muted ml-0.5">({count})</span>
+          </span>
+        );
+      })}
+      {allSameType && !hasAssets && (
+        <span className="text-[10px] text-text-muted ml-2">
+          — 上传素材后解锁更多来源类型
+        </span>
+      )}
+    </div>
+  );
 }

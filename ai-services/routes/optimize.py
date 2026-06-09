@@ -134,6 +134,81 @@ def build_optimize_router(
         Path(tmp_path).unlink(missing_ok=True)
         return {"thumbnail": None}
 
+    @router.get("/{project_id}/blueprint-payloads")
+    async def get_blueprint_payloads(project_id: str) -> dict[str, Any]:
+        """Return blueprint payload previews for AIGC segments.
+
+        When the AI video generation API is not configured, this endpoint
+        returns the full API request payload that *would* be sent, along
+        with cost estimates. Used by the frontend PayloadPreviewDrawer.
+        """
+        from models.schemas import FinalScript
+        from services.blueprint_renderer import build_blueprint_payload
+
+        # Check project exists
+        project = repository.get_project(project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        # Get the FinalScript
+        script_payload = repository.get_project_script(project_id)
+        if script_payload is None:
+            return {
+                "project_id": project_id,
+                "video_gen_available": bool(_settings.doubao_image_api_key),
+                "payloads": [],
+                "total_estimated_cost_usd": 0.0,
+                "total_estimated_tokens": 0,
+            }
+
+        script = FinalScript.model_validate(script_payload)
+
+        # Check video gen API availability
+        video_gen_available = bool(_settings.doubao_image_api_key)
+
+        payloads = []
+        total_cost = 0.0
+        total_tokens = 0
+
+        for segment in script.segments:
+            # Only include segments that would use AIGC (no asset, source is aigc or original without asset)
+            is_aigc_candidate = (
+                (segment.source == "aigc" or not segment.asset_id)
+                and segment.type not in ("packaging",)
+            )
+            if not is_aigc_candidate:
+                continue
+
+            bp = build_blueprint_payload(segment, api_key_available=video_gen_available)
+            payloads.append({
+                "segment_id": bp.segment_id,
+                "segment_type": bp.segment_type,
+                "segment_label": bp.segment_label,
+                "duration": bp.duration,
+                "visual_prompt": bp.visual_prompt,
+                "script_text": bp.script_text,
+                "camera": bp.camera,
+                "visual_fx": bp.visual_fx,
+                "pace": bp.pace,
+                "emotion": bp.emotion,
+                "model": bp.model,
+                "estimated_tokens": bp.estimated_tokens,
+                "estimated_cost_usd": bp.estimated_cost_usd,
+                "api_provider": bp.api_provider,
+                "is_available": bp.is_available,
+                "api_payload": bp.api_payload,
+            })
+            total_cost += bp.estimated_cost_usd
+            total_tokens += bp.estimated_tokens
+
+        return {
+            "project_id": project_id,
+            "video_gen_available": video_gen_available,
+            "payloads": payloads,
+            "total_estimated_cost_usd": round(total_cost, 2),
+            "total_estimated_tokens": total_tokens,
+        }
+
     return router
 
 

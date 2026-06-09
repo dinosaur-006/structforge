@@ -91,21 +91,16 @@ class TransitionAdvisor:
         from_script: str, from_visual: str,
         to_script: str, to_visual: str,
     ) -> dict[str, Any] | None:
-        """Use LLM for content-aware transition recommendation."""
+        """Use shared LightLLMClient for content-aware transition recommendation."""
+        from services.llm_client import LightLLMClient
+
         prompt = TRANSITION_PROMPT.format(
             from_type=from_type, from_script=from_script[:80], from_visual=from_visual[:80],
             to_type=to_type, to_script=to_script[:80], to_visual=to_visual[:80],
         )
         try:
-            response = httpx.post(
-                self._endpoint,
-                headers={"Authorization": f"Bearer {self._api_key}"},
-                json={"model": self._model, "messages": [{"role": "user", "content": prompt}], "max_tokens": 64},
-                timeout=10,
-            )
-            response.raise_for_status()
-            payload = response.json()
-            content = _extract_content(payload)
+            client = LightLLMClient(self._endpoint, self._api_key, self._model)
+            content = client.complete_json(prompt, max_tokens=64)
             if isinstance(content, str):
                 content = json.loads(content)
             if isinstance(content, dict):

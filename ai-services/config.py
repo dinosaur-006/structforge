@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     tts_voice: str = "zh_female_qingxin"
     tts_speed: float = 1.0
     gap_match_threshold: float = 60.0  # Lower in .env for permissive matching
+    llm_timeout_seconds: int = Field(default=60, ge=10, le=300)  # Centralized LLM timeout
+    llm_light_timeout_seconds: int = Field(default=30, ge=10, le=120)  # For lightweight calls
+    use_new_pipeline: bool = True  # Use new VideoRenderPipeline (set False to revert)
 
 
 def get_settings() -> Settings:

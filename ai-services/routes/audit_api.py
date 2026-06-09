@@ -65,21 +65,25 @@ def build_audit_router(
             for s in script
         ]
 
-        # Get ASR and Vision from the analysis result metadata
-        asr_text = str(result.get("asr", {}).get("text", ""))
-        asr_segments = result.get("asr", {}).get("segments", [])
+        # Get ASR from raw stored data (prefer _asr_data over result.asr)
+        asr_raw = result.get("_asr_data", {}) or result.get("asr", {})
+        asr_text = str(asr_raw.get("text", ""))
+        asr_segments = asr_raw.get("segments", []) or []
 
-        # Build vision frames from script segments with visual_keywords
-        vision_frames = [
-            {
+        # Build vision frames from raw stored data when available
+        # (_vision_frames has OCR, dominant_colors, product_type from pipeline)
+        raw_frames: list[dict] = result.get("_vision_frames", [])
+        vision_frames = []
+        for i, s in enumerate(script):
+            raw = raw_frames[i] if i < len(raw_frames) else {}
+            vision_frames.append({
                 "index": i + 1,
-                "tags": s.get("visual_keywords", []) or [],
-                "ocr": [],
-                "description": s.get("visual", ""),
-                "dominant_colors": [],
-            }
-            for i, s in enumerate(script)
-        ]
+                "tags": list(raw.get("tags", [])) or s.get("visual_keywords", []) or [],
+                "ocr": list(raw.get("ocr", [])),
+                "description": s.get("visual", "") or raw.get("description", ""),
+                "dominant_colors": list(raw.get("dominant_colors", [])),
+                "product_type": raw.get("product_type", ""),
+            })
 
         report = auditor.audit(
             shots=shots,

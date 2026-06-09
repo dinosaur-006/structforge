@@ -20,42 +20,30 @@ class JsonCompletionClient(Protocol):
 
 
 class DoubaoSeedClient:
-    """Doubao Seed LLM client via HTTP API (OpenAI-compatible chat completions)."""
+    """Doubao Seed LLM client — delegates to shared RobustLLMClient.
 
-    def __init__(self, settings: Any) -> None:
-        self._endpoint = str(settings.doubao_llm_endpoint or "")
-        self._api_key = str(settings.doubao_llm_api_key or "")
-        self._model = str(settings.doubao_llm_model)
+    Backward-compatible wrapper. The actual retry/timeout logic lives in
+    services.llm_client.RobustLLMClient.
+
+    Pass ``_client`` to inject a pre-configured RobustLLMClient (e.g. with
+    a custom timeout for large prompts like migration).
+    """
+
+    def __init__(self, settings: Any, *, _client: Any = None) -> None:
+        if _client is not None:
+            self._client = _client
+        else:
+            from services.llm_client import RobustLLMClient
+            endpoint = str(settings.doubao_llm_endpoint or "")
+            api_key = str(settings.doubao_llm_api_key or "")
+            model = str(settings.doubao_llm_model)
+            self._client = RobustLLMClient(endpoint, api_key, model)
 
     def complete_json(self, prompt: str) -> object:
-        import httpx
-        last_error: str | None = None
-        for attempt in range(1, 4):  # up to 3 attempts
-            try:
-                response = httpx.post(
-                    self._endpoint,
-                    headers={"Authorization": f"Bearer {self._api_key}"},
-                    json={
-                        "model": self._model,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "max_tokens": 2048,
-                    },
-                    timeout=90,
-                )
-                response.raise_for_status()
-                payload = response.json()
-                content = _extract_content(payload)
-                if isinstance(content, str):
-                    return _parse_json_content(content)
-                return content
-            except (httpx.HTTPStatusError, httpx.RemoteProtocolError, httpx.RequestError) as exc:
-                last_error = str(exc)
-                if attempt == 3:
-                    raise StructureExtractionError(
-                        f"Doubao LLM request failed after 3 attempts: {last_error}"
-                    ) from exc
-                import time
-                time.sleep(0.5 * attempt)
+        try:
+            return self._client.complete_json(prompt, max_tokens=2048)
+        except Exception as exc:
+            raise StructureExtractionError(str(exc)) from exc
 
 
 class LocalStructureClient:
@@ -77,11 +65,15 @@ PROMPT_TEMPLATE = """
 2. 每一个分镜必须根据其真实的视觉画面和文本特征，提取出绝对客观的 visual_keywords。
 
 ## 统一视觉特征词库（白名单）— 你只能在此选择，严禁自创
-- 人物动作类: [达人出镜, 面部特写, 皱眉抓狂, 震惊捂嘴, 举起商品, 涂抹演示, 撕开包装, 指向屏幕, 微笑展示, 侧脸展示]
-- 商品形态类: [瓶身特写, 液体流动, 膏体拉丝, 泡沫细腻, 材质反光, 内部拆解, 颜色对比, 质地展示, 包装特写, 挤压出液]
-- 场景与背景: [居家浴室, 卧室梳妆台, 现代办公室, 纯色背景, 嘈杂街头, 实验室场景, 厨房场景, 户外自然光]
-- 情绪与氛围: [高能炸裂, 悬念反转, 温馨治愈, 专业严谨, 紧迫焦虑, 惊喜意外]
+- 人物动作类: [达人出镜, 面部特写, 皱眉抓狂, 震惊捂嘴, 举起商品, 撕开包装, 指向屏幕, 微笑展示, 侧脸展示, 大口咀嚼, 倒出液体, 搅拌动作, 擦拭清洁, 涂抹演示]
+- 商品形态类 — 美妆洗护: [瓶身特写, 液体流动, 膏体拉丝, 泡沫细腻, 材质反光, 内部拆解, 颜色对比, 质地展示, 包装特写, 挤压出液]
+- 商品形态类 — 食品饮料: [食材特写, 酱汁流淌, 冒泡沸腾, 油炸翻滚, 调味撒粉, 拉丝芝士, 切面展示, 麻辣红油, 叠放展示, 手撕特写, 蒸腾热气, 冰霜质感, 颗粒质感, 金黄酥脆, Q弹质感]
+- 商品形态类 — 电子3C: [屏幕亮光, 金属拉丝, 接口特写, 纤薄侧面, 运行光效, 内部结构, 握持手感, 充电指示灯]
+- 商品形态类 — 服饰纺织: [面料特写, 针脚走线, 试穿展示, 挂拍陈列, 弹性拉伸, 防水测试]
+- 场景与背景: [居家浴室, 卧室梳妆台, 现代办公室, 纯色背景, 嘈杂街头, 实验室场景, 厨房场景, 户外自然光, 餐桌场景, 便利店货架, 零食堆头, 冰箱冷藏层, 夜市灯光, 咖啡厅角落]
+- 情绪与氛围: [高能炸裂, 悬念反转, 温馨治愈, 专业严谨, 紧迫焦虑, 惊喜意外, 食欲大开, 解压舒适]
 - 特效与转场: [震屏冲击, 快速闪切, 慢动作特写, 放大聚焦, 淡入溶解, 缩放弹跳]
+- 食品特有: [金黄酥脆, 蒸腾热气, 麻辣红油, 酱汁四溢, 爽滑拉丝, 冰爽水珠, 颗粒饱满, 软糯拉丝]
 
 ## 产品信息提取 — 极其严格的反幻觉规则
 这是整个分析最关键的步骤，产品名错了全盘皆错。
@@ -194,12 +186,12 @@ def extract_structure_with_retries(
         except (json.JSONDecodeError, ValidationError, StructureExtractionError) as exc:
             errors.append(str(exc))
 
-    # All LLM attempts failed — use local fallback instead of crashing the pipeline
-    import logging
-    _log = logging.getLogger(__name__)
-    _log.warning("LLM failed %d times, using local fallback. Last errors: %s", max_attempts, " | ".join(errors[-3:]))
-    return _normalize_structure(
-        VideoStructure.model_validate(build_local_structure_payload(prompt_context))
+    # All LLM attempts failed — raise hard error. Structure extraction is NOT degradable.
+    from services.llm_client import LLMError
+    raise LLMError(
+        f"视频结构分析失败，LLM 调用 {max_attempts} 次全部失败",
+        suggestion="请检查 API Key 和网络连接。如需离线工作，可在前端选择「离线模式」使用规则引擎。",
+        retryable=True,
     )
 
 
@@ -246,12 +238,29 @@ def build_local_structure_payload(prompt_context: dict[str, Any]) -> dict[str, A
         "cta_persuasiveness": 45,
         "overall": 50,
     }
+    # Preserve product name from original analysis when available.
+    product_name = "未知商品"
+    if prompt_context:
+        orig_meta = prompt_context.get("meta") or {}
+        product_name = str(orig_meta.get("productName") or prompt_context.get("product_info") or "")
+        if not product_name or product_name in ("", "未知商品"):
+            # Try project info
+            proj = prompt_context.get("project") or {}
+            brief = proj.get("product_info") or {}
+            if isinstance(brief, dict):
+                product_name = str(brief.get("productName") or "")
+            elif isinstance(brief, str):
+                product_name = brief
+            if not product_name or product_name in ("", "未知商品"):
+                product_name = "未知商品"
+
     return {
         "meta": {
             "duration": duration,
             "resolution": resolution,
             "shots": shots,
             "coverLabel": "Generated keyframe cover",
+            "productName": product_name,
         },
         "script": script,
         "rhythm": rhythm,

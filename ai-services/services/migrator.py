@@ -55,7 +55,21 @@ class MigratorService:
     ) -> None:
         self.repository = repository
         self.settings = settings or Settings()
-        self.client = client or DoubaoSeedClient(self.settings)
+        if client:
+            self.client = client
+        else:
+            # Migration prompt is the largest in the system (full structure + assets + gaps).
+            # Use a longer timeout than the default 90s.
+            from services.llm_client import RobustLLMClient
+            self.client = DoubaoSeedClient(
+                self.settings,
+                _client=RobustLLMClient(
+                    str(self.settings.doubao_llm_endpoint or ""),
+                    str(self.settings.doubao_llm_api_key or ""),
+                    str(self.settings.doubao_llm_model),
+                    timeout=120,  # migration needs more time than analysis
+                ),
+            )
         self.gap_detector = GapDetector(repository)
         self.evaluator = ResultEvaluator(
             llm_endpoint=self.settings.doubao_llm_endpoint,
@@ -76,6 +90,40 @@ class MigratorService:
         product_info, warnings = _product_info(project)
         assets = self.repository.list_assets(project_id)
         gaps = self.gap_detector.detect(project_id)
+
+        # ── Load burst audit data so the LLM can target specific weaknesses ──
+        audit_context: dict[str, Any] = {}
+        try:
+            from services.burst_auditor import BurstAuditor
+            auditor = BurstAuditor(
+                llm_endpoint=self.settings.doubao_llm_endpoint,
+                llm_api_key=self.settings.doubao_llm_api_key,
+                llm_model=self.settings.doubao_llm_model,
+            )
+            audit_context = _build_audit_summary(auditor, structure, assets)
+        except Exception:
+            pass  # audit is advisory; migration proceeds without it
+
+        # Slim the structure for the prompt — full model_dump includes
+        # visual_keywords arrays that bloat the prompt to 5000+ tokens.
+        # Keep only the fields the LLM actually needs for migration.
+        slim_structure = {
+            "meta": {
+                "duration": structure.meta.duration,
+                "productName": structure.meta.productName,
+            },
+            "script": [
+                {
+                    "id": s.id, "type": s.type, "label": s.label,
+                    "start": s.start, "end": s.end, "duration": s.duration,
+                    "goal": s.goal, "copy": s.copy_text, "visual": s.visual,
+                    "healthScore": s.healthScore,
+                }
+                for s in structure.script
+            ],
+            "packaging": structure.packaging.model_dump(mode="json", by_alias=True),
+            "health": structure.health.model_dump(mode="json", by_alias=True),
+        }
         prompt_context = {
             "project": {
                 "id": project["id"],
@@ -84,7 +132,8 @@ class MigratorService:
             },
             "style": style,
             "style_instruction": STYLE_INSTRUCTIONS[style],
-            "structure": structure.model_dump(mode="json", by_alias=True),
+            "audit": audit_context,  # burst audit findings → targeted optimization
+            "structure": slim_structure,
             "original_scores": {
                 "hook_strength": structure.health.hook_strength,
                 "product_exposure_timing": structure.health.product_exposure_timing,
@@ -156,6 +205,14 @@ class MigratorService:
             existing_meta["ai_review"] = review
             script.metadata = existing_meta
 
+        # ── Inject product identity into script metadata ──
+        # This allows compositor to read product_name/type when calling AIVideoService
+        product_identity = _extract_product_identity(prompt_context)
+        existing_meta = dict(script.metadata or {})
+        existing_meta.setdefault("productName", product_identity.get("name", ""))
+        existing_meta.setdefault("productType", product_identity.get("category", "其他"))
+        script.metadata = existing_meta
+
         self.repository.save_project_script(project_id, script)
         self.repository.save_script_version(project_id, script, self.evaluator.evaluate_script(script))
         return script
@@ -219,25 +276,48 @@ class MigratorService:
         assets: list[dict[str, Any]],
         base_warnings: list[str],
     ) -> FinalScript:
+        import sys
         errors: list[str] = []
         max_attempts = self.settings.llm_max_attempts
+        prompt_size = 0
         for attempt in range(1, max_attempts + 1):
             try:
                 prompt = _build_prompt(prompt_context, attempt)
-                raw_payload = self.client.complete_json(prompt)
-                if isinstance(raw_payload, str):
-                    raw_payload = json.loads(raw_payload)
-                script = FinalScript.model_validate(raw_payload)
+                prompt_size = len(prompt)
+                import time as _time
+                t0 = _time.monotonic()
+                # Schema injection: LLM sees FinalScript format → fewer validation errors
+                try:
+                    raw_payload = self.client.complete_json(prompt, response_type=FinalScript)
+                    script = raw_payload if isinstance(raw_payload, FinalScript) else None
+                except Exception:
+                    script = None
+                if script is None:
+                    raw_payload = self.client.complete_json(prompt)
+                    if isinstance(raw_payload, str):
+                        raw_payload = json.loads(raw_payload)
+                    raw_payload = FinalScript._try_wrap_flat_llm_output(raw_payload)
+                    script = FinalScript.model_validate(raw_payload)
+                elapsed = _time.monotonic() - t0
+                sys.stderr.write(f"[MIGRATE] LLM attempt {attempt}/{max_attempts}: prompt={prompt_size} chars, response in {elapsed:.1f}s\n")
+                sys.stderr.flush()
                 if script.version != style:
                     payload = script.model_dump(mode="json")
                     payload["version"] = style
                     script = FinalScript.model_validate(payload)
                 return _normalize_script(script, structure, assets, base_warnings)
             except (json.JSONDecodeError, ValidationError, ValueError, StructureExtractionError) as exc:
-                errors.append(str(exc))
+                err_msg = str(exc)[:200]
+                errors.append(err_msg)
+                sys.stderr.write(f"[MIGRATE] ❌ attempt {attempt} failed: {err_msg}\n")
+                sys.stderr.flush()
 
-        # Graceful degradation: if all LLM attempts fail, build a fallback script
-        # with the structure template and product info, so user can still proceed.
+        # All attempts failed
+        sys.stderr.write(f"[MIGRATE] ❌ ALL {max_attempts} attempts failed (prompt={prompt_size} chars). Errors:\n")
+        for i, e in enumerate(errors):
+            sys.stderr.write(f"[MIGRATE]   [{i+1}] {e[:200]}\n")
+        sys.stderr.flush()
+
         fallback = _build_fallback_script(structure, assets, style, base_warnings)
         if fallback is not None:
             return fallback
@@ -259,6 +339,107 @@ def _weakest_dimensions(structure: VideoStructure) -> list[str]:
     ]
     scores.sort(key=lambda x: x[1])
     return [f"{name}({label})" for _, name, label in scores[:2]]
+
+
+def _extract_product_identity(payload: dict[str, Any]) -> dict[str, str]:
+    """Extract human-readable product identity for explicit prompt injection.
+
+    Pulls from: brief > structure.meta.productName > ASR hint > project name.
+    Filename patterns like "抖音202668 241811" are detected and rejected.
+    """
+    import re
+
+    def _is_garbage_name(name: str) -> bool:
+        """Detect platform-generated filenames that are NOT product names."""
+        if not name or not name.strip():
+            return True
+        n = name.strip()
+        # TikTok pattern: "抖音" + numbers
+        if re.match(r'^抖音\d{4,}', n):
+            return True
+        # Pure numeric or "platform + numbers" pattern
+        if re.match(r'^\d{8,}$', n):
+            return True
+        # Generic "download" or "video" prefixes
+        if re.match(r'^(download|video|clip|record|screen|capture)[\-_]?\d+', n, re.IGNORECASE):
+            return True
+        return False
+
+    # Priority 1: project brief (explicit user input)
+    proj = payload.get("project") or {}
+    prod_info = proj.get("product_info") or {}
+    if isinstance(prod_info, dict) and str(prod_info.get("productName") or "").strip():
+        pn = str(prod_info.get("productName", "")).strip()
+        if not _is_garbage_name(pn):
+            return {
+                "name": pn,
+                "category": str(prod_info.get("productType", prod_info.get("category", "未分类"))).strip(),
+                "points": ", ".join([str(p) for p in (prod_info.get("sellingPoints") or [])][:5]) or "未指定",
+                "tone": str(prod_info.get("tone", "专业可信")).strip(),
+            }
+    if isinstance(prod_info, str) and len(prod_info.strip()) >= 2 and not _is_garbage_name(prod_info.strip()):
+        return {"name": prod_info.strip(), "category": "未分类", "points": "未指定", "tone": "专业可信"}
+
+    # Priority 2: structure meta (LLM-extracted from the sample video)
+    structure = payload.get("structure") or {}
+    meta = structure.get("meta") or {}
+    pn = str(meta.get("productName") or "").strip()
+    if pn and pn not in ("", "未知商品", "未识别（无语音）") and not _is_garbage_name(pn):
+        return {"name": pn, "category": "未分类", "points": "未指定", "tone": "专业可信"}
+
+    # Priority 3: project name (from filename) — only if not garbage
+    proj_name = str(proj.get("name") or "").strip()
+    if proj_name and not _is_garbage_name(proj_name):
+        return {"name": proj_name, "category": "未分类", "points": "未指定", "tone": "专业可信"}
+
+    return {"name": "未指定产品", "category": "未分类", "points": "未指定", "tone": "专业可信"}
+
+
+def _build_audit_summary(auditor: Any, structure: VideoStructure, assets: list[dict[str, Any]]) -> dict[str, Any]:
+    """Run a lightweight audit and return a compact summary for the migration prompt.
+
+    Only runs the rule-based metrics (no LLM call) to keep it fast.
+    Returns empty dict if audit can't run.
+    """
+    try:
+        from services.burst_metrics import BurstMetricsCalculator
+
+        shots = [
+            {"start_s": float(s.start), "end_s": float(s.end),
+             "duration_s": float(s.duration), "type": s.type}
+            for s in structure.script
+        ]
+        vision_frames = [
+            {"index": i+1, "tags": getattr(s, "visual_keywords", []) or [],
+             "ocr": [], "description": s.visual, "dominant_colors": []}
+            for i, s in enumerate(structure.script)
+        ]
+        calc = BurstMetricsCalculator(
+            shots=shots, asr_text="", asr_segments=[],
+            vision_frames=vision_frames, duration=structure.meta.duration,
+            rhythm_points=structure.rhythm, packaging=structure.packaging,
+            platform="douyin",
+        )
+        dimensions = calc.dimension_reports()
+
+        # Extract top 3 actionable weaknesses
+        weaknesses = []
+        for dim in sorted(dimensions, key=lambda d: d.score):
+            for w in dim.weaknesses[:1]:
+                weaknesses.append({"dimension": dim.name, "score": dim.score, "weakness": w})
+
+        # Extract auto-fix patches
+        patches = calc.generate_auto_fix_patches()[:3]
+
+        return {
+            "weakest_dimensions": weaknesses[:3],
+            "auto_fix_suggestions": [
+                {"target": p["metric_name"], "action": p["action"]} for p in patches
+            ],
+            "overall_rule_score": sum(d.score for d in dimensions) // max(len(dimensions), 1),
+        }
+    except Exception:
+        return {}
 
 
 def _product_info(project: dict[str, Any]) -> tuple[str | dict[str, Any], list[str]]:
@@ -295,8 +476,27 @@ def _asset_summary(asset: dict[str, Any]) -> dict[str, Any]:
 def _build_prompt(context: dict[str, Any], attempt: int) -> str:
     payload = dict(context)
     payload["attempt"] = attempt
+
+    # ── Extract product identity for explicit injection ──
+    # The LLM must see the product name in the prompt text itself, not just
+    # in the JSON context. Otherwise beauty-biased visual keywords in the
+    # structure can cause the model to hallucinate a different product.
+    product_identity = _extract_product_identity(payload)
+
     return f"""
 你是 StructForge 的首席视频脚本导演，你的任务是将爆款样例视频的**结构骨架和创作方法**迁移到新产品上，生成一条比原视频**更具爆款潜力**的新脚本。
+
+## ⚠️ 目标产品（绝对不可改变）
+
+你要为以下产品创作脚本：
+**产品名称：{product_identity['name']}**
+**产品品类：{product_identity['category']}**
+**核心卖点：{product_identity['points']}**
+**品牌调性：{product_identity['tone']}**
+
+以上产品信息是铁律。脚本中的每一句口播文案、每一个画面描述都必须围绕这个产品。
+严禁将产品替换为其他品类（如把食品写成护肤品、把电子写成美妆等）。
+严禁使用与产品品类无关的视觉描述（如食品产品出现"挤压出液""泡沫细腻"）。
 
 ## 核心原则：你是在"迁移方法"，不是"改写文案"
 
@@ -372,7 +572,17 @@ def _build_prompt(context: dict[str, Any], attempt: int) -> str:
 
 最薄弱维度: {json.dumps(payload.get('original_scores', {}).get('weakest_dimensions', []), ensure_ascii=False)}
 
-**你必须重点强化这两个薄弱维度。** 原视频在某项得分低，你的脚本必须在该维度使用更强的制作手法和更精准的文案。
+## 爆款审计的针对性优化指令（硬性要求）
+
+以下是从 32 项量化指标审计中提取的具体改进方向。**你必须在脚本中针对每一条做出可验证的改进**，不能仅靠通用文案：
+
+{json.dumps(payload.get('audit', {}).get('weakest_dimensions', []), ensure_ascii=False, indent=2)}
+
+自动修复建议: {json.dumps(payload.get('audit', {}).get('auto_fix_suggestions', []), ensure_ascii=False, indent=2)}
+
+规则量化综合分: {payload.get('audit', {}).get('overall_rule_score', 'N/A')}
+
+**你必须重点强化这些薄弱维度。** 规则引擎已经给出了具体的改进方向，你的脚本必须在对应的分镜中使用更强的制作手法和更精准的文案来执行这些改进。
 
 ## 品牌调性与情绪共鸣参数
 
@@ -452,11 +662,30 @@ def _build_fallback_script(
     style: str,
     base_warnings: list[str],
 ) -> FinalScript | None:
-    """Build a basic script from the structure template when LLM is unavailable."""
+    """Build a basic script from the structure template when LLM is unavailable.
+
+    Segments are marked with their actual source type:
+    - 'original' if a matching uploaded asset exists
+    - 'packaging' if no asset but packaging fallback could fill it
+    - 'aigc' if no asset and packaging won't work (needs AI generation)
+    """
     try:
-        asset_ids = [a["id"] for a in assets]
+        from models.schemas import FinalSegmentSource
+
+        # Exclude reference video — it's the sample, not a user-uploaded content asset.
+        # Reference-bound segments without user assets need AI generation.
+        user_assets = [a for a in assets if a.get("file_path")
+                       and not (a.get("analysis") or {}).get("reference_source")]
+        asset_ids = [a["id"] for a in user_assets]
         segments = []
         for seg in structure.script:
+            # Determine actual source based on USER asset availability.
+            # User-matched → original. No match → aigc (needs AI generation).
+            if seg.assetId and seg.assetId in asset_ids:
+                source: FinalSegmentSource = "original"
+            else:
+                source: FinalSegmentSource = "aigc"
+
             segments.append({
                 "id": seg.id,
                 "type": seg.type,
@@ -465,12 +694,18 @@ def _build_fallback_script(
                 "duration": seg.duration,
                 "script": seg.copy_text or f"{seg.label} 内容",
                 "visual": seg.visual or f"{seg.label} 画面",
-                "asset_id": asset_ids[0] if asset_ids else None,
+                "asset_id": seg.assetId if seg.assetId in asset_ids else None,
                 "subtitle_style": "白字黑边",
                 "transition": "硬切",
                 "locked": False,
-                "source": "original",
+                "source": source,
             })
+
+        source_counts: dict[str, int] = {}
+        for s in segments:
+            source_counts[s["source"]] = source_counts.get(s["source"], 0) + 1
+        summary = ", ".join(f"{v}×{k}" for k, v in source_counts.items())
+
         return FinalScript.model_validate({
             "version": style,
             "total_duration": structure.meta.duration,
@@ -478,7 +713,9 @@ def _build_fallback_script(
             "metadata": {
                 "restructure_needed": False,
                 "edit_reason": "LLM不可用时使用模板结构",
-                "warnings": [*base_warnings, "AI服务暂时不可用，已使用基础模板生成脚本"],
+                "warnings": [*base_warnings,
+                    f"AI服务暂时不可用，已使用基础模板。素材分布: {summary}",
+                    "上传素材后可在编辑页面使用「修复缺口」自动匹配和重组"],
             },
         })
     except Exception:
@@ -494,18 +731,82 @@ def _normalize_script(
     structure_duration = float(structure.meta.duration or sum(segment.duration for segment in structure.script))
     if structure_duration > 0:
         delta = abs(script.total_duration - structure_duration) / structure_duration
-        if delta > 0.10:
-            raise ValueError("FinalScript total_duration differs from structure duration by more than 10%")
+        if delta > 0.50:
+            # LLM likely returned a flat segment that was auto-wrapped — total_duration
+            # is meaningless. Use the structure duration instead.
+            import sys
+            sys.stderr.write(f"[MIGRATE] total_duration mismatch ({script.total_duration:.1f}s vs {structure_duration:.1f}s, {delta*100:.0f}%), using structure duration\n")
+            sys.stderr.flush()
+            payload = script.model_dump(mode="json")
+            payload["total_duration"] = structure_duration
+            script = FinalScript.model_validate(payload)
+        elif delta > 0.25:
+            raise ValueError(f"FinalScript total_duration ({script.total_duration:.1f}s) differs from structure ({structure_duration:.1f}s) by {delta*100:.0f}% (max 25%)")
 
     asset_by_id = {asset["id"]: asset for asset in assets}
     baseline_positions = {segment.id: index for index, segment in enumerate(structure.script)}
-    bound_assets = {segment.id: segment.assetId for segment in structure.script if segment.assetId in asset_by_id}
+
+    # ── Determine user asset IDs (exclude reference video) ──
+    user_asset_ids: set[str] = {
+        a["id"] for a in assets
+        if a.get("file_path") and not (a.get("analysis") or {}).get("reference_source")
+    }
+
+    # Exclude reference video — only user-uploaded assets should auto-bind
+    bound_assets = {segment.id: segment.assetId for segment in structure.script
+                    if segment.assetId in user_asset_ids}
     template_by_id = {segment.id: segment for segment in structure.script}
     payload = script.model_dump(mode="json")
     generated_segments = {segment["id"]: segment for segment in payload["segments"]}
     structure_ids = [segment.id for segment in structure.script]
-    if len(generated_segments) != len(payload["segments"]) or set(generated_segments) != set(structure_ids):
-        raise ValueError("FinalScript segment ids must exactly match the current structure")
+
+    # ── Smart segment mapping: handle LLM returning mismatched segment counts ──
+    if set(generated_segments) != set(structure_ids):
+        import sys
+        sys.stderr.write(
+            f"[MIGRATE] Segment ID mismatch: generated={list(generated_segments.keys())[:3]}..., "
+            f"expected={structure_ids[:3]}... → auto-mapping by position\n"
+        )
+        sys.stderr.flush()
+        # Map LLM segments to structure by position, reusing LLM content as template
+        llm_segments = list(payload["segments"])
+        mapped = []
+        for i, struct_id in enumerate(structure_ids):
+            if i < len(llm_segments):
+                # Use LLM segment content but override id/type from structure
+                seg = dict(llm_segments[i])
+                seg["id"] = struct_id
+                seg["type"] = template_by_id[struct_id].type
+                # Force-override source: only "original" if matched to a real user asset
+                aid = seg.get("asset_id")
+                seg["source"] = "original" if (aid and aid in user_asset_ids) else "aigc"
+                seg.setdefault("subtitle_style", "白字黑边")
+                seg.setdefault("transition", "硬切")
+                seg.setdefault("locked", False)
+                seg.setdefault("asset_id", None)
+                seg.setdefault("camera", "静态")
+                seg.setdefault("subtitle_anim", "淡入")
+                seg.setdefault("pace", "正常")
+                seg.setdefault("emotion", "亲切")
+                seg.setdefault("visual_fx", "无")
+                mapped.append(seg)
+            else:
+                # More structure segments than LLM returned → fill from template
+                tmpl = template_by_id[struct_id]
+                mapped.append({
+                    "id": struct_id, "type": tmpl.type,
+                    "start": tmpl.start, "end": tmpl.end, "duration": tmpl.duration,
+                    "script": tmpl.copy_text or f"{tmpl.label} 内容",
+                    "visual": tmpl.visual or f"{tmpl.label} 画面",
+                    "source": "original" if (tmpl.assetId and tmpl.assetId in user_asset_ids) else "aigc",
+                    "subtitle_style": "白字黑边",
+                    "transition": "硬切", "locked": False, "asset_id": tmpl.assetId if (tmpl.assetId and tmpl.assetId in user_asset_ids) else None,
+                    "camera": "静态", "subtitle_anim": "淡入",
+                    "pace": "正常", "emotion": "亲切", "visual_fx": "无",
+                })
+        payload["segments"] = mapped
+        base_warnings.append(f"LLM返回{len(llm_segments)}个分镜，已自动映射到结构的{len(structure_ids)}个分镜")
+        generated_segments = {segment["id"]: segment for segment in payload["segments"]}
     restructure_applied = _ai_requests_restructure(payload.get("metadata"))
     if not restructure_applied:
         payload["segments"] = [generated_segments[segment_id] for segment_id in structure_ids]
@@ -513,6 +814,9 @@ def _normalize_script(
     for segment in payload["segments"]:
         template_segment = template_by_id[segment["id"]]
         segment["type"] = template_segment.type
+        # Force-override source based on actual asset match (not LLM's guess)
+        aid = segment.get("asset_id")
+        segment["source"] = "original" if (aid and aid in user_asset_ids) else "aigc"
         if not restructure_applied:
             # Preserve original durations but allow LLM to optimize product/CTA timing
             seg_type = segment.get("type", "")
@@ -544,8 +848,8 @@ def _normalize_script(
         _extract_params_from_script(segment)
 
     payload["total_duration"] = _reflow_output_timeline(payload["segments"])
-    if structure_duration > 0 and abs(payload["total_duration"] - structure_duration) / structure_duration > 0.10:
-        raise ValueError("Applied FinalScript duration differs from structure duration by more than 10%")
+    if structure_duration > 0 and abs(payload["total_duration"] - structure_duration) / structure_duration > 0.25:
+        raise ValueError(f"Applied duration ({payload['total_duration']:.1f}s) differs from structure ({structure_duration:.1f}s) by >25%")
 
     for index, segment in enumerate(payload["segments"]):
         asset_id = segment.get("asset_id")

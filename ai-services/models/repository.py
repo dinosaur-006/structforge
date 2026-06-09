@@ -249,6 +249,8 @@ class SQLiteRepository:
         stage: str | None = None,
         result: VideoStructure | dict[str, Any] | None = None,
         error: str | None = None,
+        vision_frames: list[dict[str, Any]] | None = None,
+        asr_data: dict[str, Any] | None = None,
     ) -> None:
         values: dict[str, Any] = {"updated_at": _utc_now()}
         if status is not None:
@@ -262,6 +264,13 @@ class SQLiteRepository:
                 result_payload = result.model_dump(mode="json", by_alias=True)
             else:
                 result_payload = VideoStructure.model_validate(result).model_dump(mode="json", by_alias=True)
+            # ── Store vision + ASR raw data alongside structure ──
+            # These are NOT part of VideoStructure schema — they're metadata
+            # needed by the burst auditor for full-modal analysis.
+            if vision_frames:
+                result_payload["_vision_frames"] = vision_frames
+            if asr_data:
+                result_payload["_asr_data"] = asr_data
             values["result_json"] = json.dumps(result_payload, ensure_ascii=False)
         if error is not None:
             values["error"] = error
@@ -271,7 +280,11 @@ class SQLiteRepository:
                 analysis_jobs.update().where(analysis_jobs.c.job_id == job_id).values(**values)
             )
 
-    def complete_job(self, job_id: str, result: VideoStructure | dict[str, Any]) -> None:
+    def complete_job(
+        self, job_id: str, result: VideoStructure | dict[str, Any],
+        vision_frames: list[dict[str, Any]] | None = None,
+        asr_data: dict[str, Any] | None = None,
+    ) -> None:
         structure = VideoStructure.model_validate(result)
         self.update_job(
             job_id,
@@ -279,6 +292,8 @@ class SQLiteRepository:
             progress=100,
             stage="Analysis completed",
             result=structure,
+            vision_frames=vision_frames,
+            asr_data=asr_data,
         )
         job = self.get_job(job_id)
         if job and job.get("project_id"):

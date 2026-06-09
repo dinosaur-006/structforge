@@ -45,19 +45,23 @@ def test_llm_extraction_retries_invalid_payloads_until_valid() -> None:
 
 
 def test_llm_extraction_fails_after_three_invalid_attempts() -> None:
-    """After 3 invalid LLM attempts, system now falls back to local structure instead of crashing."""
+    """After 3 invalid LLM attempts, system raises LLMError — no silent degradation."""
+    import pytest
+    from services.llm_client import LLMError
+
     client = SequenceClient([{"script_structure": []}, {"script_structure": []}, {"bad": True}])
 
-    structure = extract_structure_with_retries(
-        client=client,
-        prompt_context={"meta": {"duration": 35}},
-        max_attempts=3,
-    )
+    with pytest.raises(LLMError) as exc_info:
+        extract_structure_with_retries(
+            client=client,
+            prompt_context={"meta": {"duration": 35}},
+            max_attempts=3,
+        )
 
     assert client.calls == 3
-    # Fallback should produce a valid structure with patched fields
-    assert structure.health.overall == 50  # fallback health score
-    assert structure.meta.productName == "未知商品"
+    assert "3 次全部失败" in str(exc_info.value)
+    assert exc_info.value.retryable is True
+    assert exc_info.value.suggestion != ""
 
 
 def test_parse_json_content_extracts_object_from_markdown_response() -> None:
@@ -112,6 +116,44 @@ def test_doubao_transport_disconnect_is_retried(monkeypatch) -> None:
     assert structure.health.overall == 72
 
 
+def test_llm_error_to_dict_serialization():
+    """LLMError.to_dict() produces frontend-consumable JSON structure."""
+    from services.llm_client import LLMError
+
+    e = LLMError("test message", suggestion="请检查 API Key", retryable=False, status_code=401)
+    d = e.to_dict()
+
+    assert d["error"] == "llm_unavailable"
+    assert d["message"] == "test message"
+    assert d["suggestion"] == "请检查 API Key"
+    assert d["retryable"] is False
+    assert d["status_code"] == 401
+
+
+def test_llm_client_retries_transient_network_error(monkeypatch):
+    """Transient network errors should be retried, not immediately raised."""
+    from services.llm_client import RobustLLMClient
+    import httpx as _httpx
+
+    calls = 0
+    request = _httpx.Request("POST", "https://unit.test/chat")
+
+    def fake_post(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls <= 2:
+            raise _httpx.RemoteProtocolError("Server disconnected", request=request)
+        return _httpx.Response(200, request=request, json={
+            "choices": [{"message": {"content": '{"status":"ok"}'}}]
+        })
+
+    monkeypatch.setattr(_httpx, "post", fake_post)
+    client = RobustLLMClient("https://unit.test/chat", "test-key", "test-model", max_retries=3)
+    result = client.complete_json("test")
+    assert calls == 3
+    assert result == {"status": "ok"}
+
+
 def test_doubao_http_service_error_is_retried(monkeypatch) -> None:
     calls = 0
     request = httpx.Request("POST", "https://unit.test/chat")
@@ -140,3 +182,41 @@ def test_doubao_http_service_error_is_retried(monkeypatch) -> None:
 
     assert calls == 2
     assert structure.health.overall == 72
+
+
+def test_llm_error_to_dict_serialization():
+    """LLMError.to_dict() produces frontend-consumable JSON structure."""
+    from services.llm_client import LLMError
+
+    e = LLMError("test message", suggestion="请检查 API Key", retryable=False, status_code=401)
+    d = e.to_dict()
+
+    assert d["error"] == "llm_unavailable"
+    assert d["message"] == "test message"
+    assert d["suggestion"] == "请检查 API Key"
+    assert d["retryable"] is False
+    assert d["status_code"] == 401
+
+
+def test_llm_client_retries_transient_network_error(monkeypatch):
+    """Transient network errors should be retried, not immediately raised."""
+    from services.llm_client import RobustLLMClient
+    import httpx as _httpx
+
+    calls = 0
+    request = _httpx.Request("POST", "https://unit.test/chat")
+
+    def fake_post(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls <= 2:
+            raise _httpx.RemoteProtocolError("Server disconnected", request=request)
+        return _httpx.Response(200, request=request, json={
+            "choices": [{"message": {"content": '{"status":"ok"}'}}]
+        })
+
+    monkeypatch.setattr(_httpx, "post", fake_post)
+    client = RobustLLMClient("https://unit.test/chat", "test-key", "test-model", max_retries=3)
+    result = client.complete_json("test")
+    assert calls == 3
+    assert result == {"status": "ok"}

@@ -91,6 +91,11 @@ class AssetMatcher:
                 else:
                     score = _keyword_score(searchable, ROLE_KEYWORDS.get(segment.type, []))
 
+                # ── Scene type boost: direct type match → +25 ──
+                asset_scene = str((asset.get("analysis") or {}).get("scene_type", "") or "")
+                if asset_scene == segment.type:
+                    score = min(score + 25, 100)
+
                 status = match_status(score)
                 matches.append({
                     "asset_id": asset["id"],

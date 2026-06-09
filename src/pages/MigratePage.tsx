@@ -1,6 +1,7 @@
 import { Loader2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { AssetPanel } from '../components/migrate/AssetPanel';
 import { CreativeBriefPanel } from '../components/migrate/CreativeBriefPanel';
 import { NLEditInput } from '../components/migrate/NLEditInput';
 import { Button } from '../components/ui/Button';
@@ -42,12 +43,15 @@ export default function MigratePage() {
   const project = findProject(projectId);
   const currentStructure = useAppStore((s) => s.currentStructure);
   const scriptLoading = useAppStore((s) => s.scriptLoading);
+  const assets = useAppStore((s) => s.assets);
+  const assetLoading = useAppStore((s) => s.assetLoading);
 
   const fetchProjects = useAppStore((s) => s.fetchProjects);
   const loadProjectStructure = useAppStore((s) => s.loadProjectStructure);
   const updateProjectBrief = useAppStore((s) => s.updateProjectBrief);
   const migrateScript = useAppStore((s) => s.migrateScript);
   const nlEdit = useAppStore((s) => s.nlEdit);
+  const uploadAsset = useAppStore((s) => s.uploadAsset);
 
   // ── Compute suggested brief DURING render (before useEffect fires) ──
   const suggestedBrief = useMemo(() => {
@@ -201,6 +205,19 @@ export default function MigratePage() {
           对 AI 生成的结构不满意？用一句话告诉 AI 怎么改：
         </p>
         <NLEditInput onCommand={(cmd) => nlEdit(cmd)} loading={routeLoading} />
+      </div>
+
+      {/* ── 素材上传与管理 ── */}
+      <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
+        <p className="mb-3 text-sm font-medium text-text-primary">
+          上传产品素材（可选，上传后可自动匹配空缺分镜，减少 AI 生成需求）
+        </p>
+        <AssetPanel
+          assets={assets}
+          assetLoading={assetLoading}
+          onUploadAsset={(file) => uploadAsset(file)}
+          projectId={projectId}
+        />
       </div>
 
       {/* ── 底部固定条：唯一主操作 ── */}

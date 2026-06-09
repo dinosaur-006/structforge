@@ -69,6 +69,14 @@ export function BurstAuditPanel({ report }: { report: AuditReport | null }) {
         </div>
       </div>
 
+      {/* LLM unavailable banner */}
+      {report.llm_insights && (report.llm_insights as Record<string, unknown>).error && (
+        <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-4 py-2 text-xs text-amber-400/80">
+          LLM 软分析暂时不可用（{(report.llm_insights as Record<string, unknown>).error as string}），
+          当前展示基于 32 项规则量化的硬指标结果。建议稍后重试以获取 AI 改进建议。
+        </div>
+      )}
+
       {/* Suggestions */}
       {report.suggestions.length > 0 && (
         <div className="rounded-lg border border-primary/20 bg-primary-muted p-4">

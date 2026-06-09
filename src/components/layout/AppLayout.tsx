@@ -1,5 +1,5 @@
-import { ChevronLeft, ChevronRight, FlaskConical, FolderOpen, HelpCircle, Menu, Sparkles, User } from 'lucide-react';
-import { Suspense, useEffect } from 'react';
+import { ChevronLeft, ChevronRight, Cpu, FlaskConical, FolderOpen, HelpCircle, Menu, Sparkles, User } from 'lucide-react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { Version } from '../Version';
 import { Button } from '../ui/Button';
@@ -90,7 +90,19 @@ export function AppLayout() {
   const setMobileOpen = useAppStore((s) => s.setMobileSidebarOpen);
   const routeLoading = useAppStore((s) => s.routeLoading);
   const setRouteLoading = useAppStore((s) => s.setRouteLoading);
+  const apiCapabilities = useAppStore((s) => s.apiCapabilities);
+  const blueprintPayloads = useAppStore((s) => s.blueprintPayloads);
   const location = useLocation();
+  const [indicatorHovered, setIndicatorHovered] = useState(false);
+
+  // Pre-viz mode indicator logic
+  const preVizStatus = useMemo(() => {
+    if (apiCapabilities.videoGen || !apiCapabilities.loaded) return null;
+    const count = blueprintPayloads?.payloads?.length ?? 0;
+    if (count === 0) return null;
+    const cost = blueprintPayloads?.total_estimated_cost_usd ?? 0;
+    return { count, cost };
+  }, [apiCapabilities, blueprintPayloads]);
 
   useEffect(() => {
     setRouteLoading(true);
@@ -130,6 +142,63 @@ export function AppLayout() {
             <Outlet />
           </Suspense>
         </main>
+
+        {/* ── Pre-viz Mode Global Indicator ── */}
+        {preVizStatus ? (
+          <div
+            className="fixed top-4 right-4 z-50 select-none"
+            onMouseEnter={() => setIndicatorHovered(true)}
+            onMouseLeave={() => setIndicatorHovered(false)}
+          >
+            {/* Floating indicator pill */}
+            <div className={cn(
+              'flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-all duration-300',
+              'border-[#FFB300]/30 bg-[#0A0A10]/90 backdrop-blur-md shadow-lg',
+              indicatorHovered ? 'border-[#FFB300]/60 shadow-[0_0_20px_rgba(255,179,0,0.15)]' : '',
+            )}>
+              {/* Pulsing amber dot */}
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#FFB300] opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-[#FFB300]" />
+              </span>
+              <span className="text-[#FFB300]">Pre-viz 离线模式</span>
+              <span className="text-text-muted">·</span>
+              <span className="text-text-secondary font-mono">{preVizStatus.count} 个预留位</span>
+              {indicatorHovered ? (
+                <Cpu className="h-3.5 w-3.5 text-[#FFB300] animate-pulse" />
+              ) : (
+                <span className="text-[10px] text-text-muted font-mono">${preVizStatus.cost.toFixed(2)}</span>
+              )}
+            </div>
+
+            {/* Hover tooltip */}
+            {indicatorHovered ? (
+              <div className="absolute top-full right-0 mt-2 w-72 rounded-lg border border-[#FFB300]/20 bg-[#0A0A10]/95 backdrop-blur-xl p-4 shadow-[0_0_30px_rgba(255,179,0,0.08)] animate-in">
+                <p className="text-xs font-semibold text-[#FFB300] flex items-center gap-1.5 mb-2">
+                  <Cpu className="h-3.5 w-3.5" />
+                  离线 Pre-viz 导演分镜模式
+                </p>
+                <p className="text-xs text-text-secondary leading-relaxed mb-3">
+                  系统已完成物理引擎层面的{preVizStatus.count}个分镜规划。填入 Seedance API Key 后，
+                  AI 将自动生成真实视频画面替换蓝图卡片。当前模式下音频（TTS · BGM）完整播放。
+                </p>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="rounded bg-[#FFB300]/5 px-2 py-1.5">
+                    <span className="text-text-muted">预留位数</span>
+                    <p className="font-mono font-bold text-text-primary">{preVizStatus.count}</p>
+                  </div>
+                  <div className="rounded bg-[#FFB300]/5 px-2 py-1.5">
+                    <span className="text-text-muted">预估算力成本</span>
+                    <p className="font-mono font-bold text-green-400">${preVizStatus.cost.toFixed(2)}</p>
+                  </div>
+                </div>
+                <p className="mt-2 text-[10px] text-text-muted leading-relaxed">
+                  底层 AI 模型可替换为 Sora / Runway / Kling，Payload 结构通用。
+                </p>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         {/* Floating help button */}
         <button

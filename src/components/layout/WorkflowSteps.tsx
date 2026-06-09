@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import { cn } from '../../shared/cn';
 
 interface Step {
@@ -18,6 +19,7 @@ interface WorkflowStepsProps {
 }
 
 export function WorkflowSteps({ current, projectId }: WorkflowStepsProps) {
+  const navigate = useNavigate();
   const currentIndex = steps.findIndex((s) => s.key === current);
 
   return (
@@ -36,8 +38,7 @@ export function WorkflowSteps({ current, projectId }: WorkflowStepsProps) {
               href={href}
               onClick={(e) => {
                 e.preventDefault();
-                window.history.pushState(null, '', href);
-                window.dispatchEvent(new PopStateEvent('popstate'));
+                navigate(href);
               }}
               className={cn(
                 'flex items-center gap-1.5 rounded-full px-2.5 py-1 font-medium transition-colors',

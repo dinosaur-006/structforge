@@ -10,8 +10,6 @@ import json
 import logging
 from typing import Any
 
-import httpx
-
 from services.burst_metrics import (
     BurstMetricsCalculator,
     DimensionReport,
@@ -134,7 +132,9 @@ class BurstAuditor:
         )
 
     def _llm_analyze(self, calc: BurstMetricsCalculator, metrics: list[MetricResult]) -> dict[str, Any]:
-        """Invoke LLM for soft qualitative analysis."""
+        """Invoke LLM for soft qualitative analysis via shared RobustLLMClient."""
+        from services.llm_client import RobustLLMClient, LLMError
+
         vision_tags = []
         ocr_parts: list[str] = []
         for f in calc.vision_frames[:10]:
@@ -149,25 +149,17 @@ class BurstAuditor:
             duration=calc.duration,
         )
 
-        resp = httpx.post(
-            self._llm_endpoint,
-            headers={"Authorization": f"Bearer {self._llm_api_key}"},
-            json={
-                "model": self._llm_model,
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 256,
-            },
-            timeout=20,
-        )
-        resp.raise_for_status()
-        payload = resp.json()
-        content = ""
-        if "choices" in payload:
-            content = payload["choices"][0].get("message", {}).get("content", "")
-
-        if content.strip().startswith("{"):
-            return json.loads(content.strip())
-        return {"raw_response": content}
+        try:
+            client = RobustLLMClient(self._llm_endpoint, self._llm_api_key, self._llm_model)
+            result = client.complete_json(prompt, max_tokens=256)
+            if isinstance(result, dict):
+                return result
+            if isinstance(result, str) and result.strip().startswith("{"):
+                return json.loads(result.strip())
+            return {"raw_response": str(result)}
+        except LLMError as exc:
+            log.warning("Audit LLM failed: %s", exc)
+            return {"error": str(exc), "top_strength": "N/A", "top_weakness": "N/A"}
 
     def _rule_suggestions(self, dimensions: list[DimensionReport]) -> list[dict[str, str]]:
         """Generate rule-based suggestions when LLM is unavailable."""

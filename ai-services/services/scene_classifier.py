@@ -82,7 +82,9 @@ class SceneClassifier:
         return _keyword_classify_file(path)
 
     def _llm_classify(self, tags: list[str], description: str, ocr: str) -> str | None:
-        """Use Doubao LLM to semantically classify the asset with probability matrix."""
+        """Use shared LightLLMClient for semantic scene classification."""
+        from services.llm_client import LightLLMClient
+
         prompt = CLASSIFY_PROMPT.format(
             hook=SEGMENT_DEFINITIONS["hook"],
             pain=SEGMENT_DEFINITIONS["pain"],
@@ -94,19 +96,8 @@ class SceneClassifier:
             ocr=ocr or "无",
         )
         try:
-            response = httpx.post(
-                self._endpoint,
-                headers={"Authorization": f"Bearer {self._api_key}"},
-                json={
-                    "model": self._model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 128,
-                },
-                timeout=15,
-            )
-            response.raise_for_status()
-            payload = response.json()
-            content = _extract_content(payload)
+            client = LightLLMClient(self._endpoint, self._api_key, self._model)
+            content = client.complete_text(prompt, max_tokens=128)
             if isinstance(content, str):
                 content = json.loads(content)
             # New format: probability matrix

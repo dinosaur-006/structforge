@@ -1,3 +1,9 @@
+import { cn } from '../../shared/cn';
+
+/**
+ * Metric data contract — kept backward-compatible with BurstAuditPanel.
+ * The component derives visual state from ``passed`` and ``score``.
+ */
 interface MetricData {
   id: string;
   name: string;
@@ -7,43 +13,97 @@ interface MetricData {
   passed: boolean;
 }
 
+/** Top-edge neon glow gradient by score tier. */
+const GLOW_GRADIENT: Record<string, string> = {
+  emerald: 'from-emerald-500/60',
+  amber: 'from-amber-500/60',
+  red: 'from-red-500/60',
+};
+
+const scoreTier = (score: number) =>
+  score >= 80 ? 'emerald' : score >= 50 ? 'amber' : 'red';
+
+/** Glow-dot indicator — the user's "status dot with shadow" concept. */
+const DOT_STYLE: Record<string, string> = {
+  emerald: 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]',
+  amber: 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]',
+  red: 'bg-red-400 shadow-[0_0_8px_rgba(248,113,113,0.6)]',
+};
+
 export function MetricCard({ metric }: { metric: MetricData }) {
-  const ringColor = metric.score >= 80 ? '#10B981' : metric.score >= 50 ? '#F59E0B' : '#EF4444';
+  const tier = scoreTier(metric.score);
+  const ringColor =
+    metric.score >= 80 ? '#10B981' : metric.score >= 50 ? '#F59E0B' : '#EF4444';
   const circumference = 2 * Math.PI * 18;
   const dashOffset = circumference - (metric.score / 100) * circumference;
 
   return (
-    <div className={`rounded-lg border p-3 shadow-sm transition-colors ${metric.passed ? 'border-success/30 bg-success/5' : 'border-border bg-card'}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex-1 min-w-0">
-          <p className="text-xs font-semibold text-text-primary truncate">{metric.name}</p>
-          <p className="mt-1 text-[10px] text-text-muted leading-relaxed">{metric.evidence}</p>
+    <div
+      className={cn(
+        'relative flex flex-col p-5 overflow-hidden transition-all duration-300',
+        'bg-slate-900 rounded-2xl ring-1 ring-white/5 hover:ring-white/15',
+        'group',
+      )}
+    >
+      {/* ── Top-edge neon glow line ── */}
+      <div
+        className={cn(
+          'absolute top-0 left-1/4 w-1/2 h-px bg-gradient-to-r to-transparent',
+          'from-transparent via-current',
+          GLOW_GRADIENT[tier],
+        )}
+        style={{ color: ringColor }}
+      />
+
+      {/* Header row: name + glow-dot + raw_value chip */}
+      <div className="flex justify-between items-start mb-3">
+        <h3 className="text-sm font-medium text-slate-400 tracking-wide truncate flex-1 min-w-0">
+          {metric.name}
+        </h3>
+
+        <div className="flex items-center gap-2 flex-none ml-2">
+          {/* Original / raw value chip (user's "原: X" concept) */}
           {metric.raw_value && (
-            <span className="mt-1 inline-block rounded bg-sidebar px-1.5 py-0.5 text-[9px] font-mono text-text-secondary">
-              {metric.raw_value}
+            <span className="px-2 py-0.5 text-[10px] font-mono text-slate-300 bg-slate-800 rounded-full ring-1 ring-white/5">
+              原: {metric.raw_value}
             </span>
           )}
+          {/* Glow-dot status indicator */}
+          <span
+            className={cn(
+              'w-2 h-2 rounded-full',
+              DOT_STYLE[tier],
+            )}
+          />
         </div>
-        <div className="relative h-12 w-12 flex-none">
-          <svg className="h-12 w-12 -rotate-90" viewBox="0 0 44 44">
-            <circle cx="22" cy="22" r="18" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="3" />
+      </div>
+
+      {/* Score + ring */}
+      <div className="flex items-center gap-4 mb-3">
+        <span className="text-3xl font-light font-mono text-slate-100">
+          {metric.score}
+        </span>
+        <div className="relative h-10 w-10 flex-none">
+          <svg className="h-10 w-10 -rotate-90" viewBox="0 0 44 44">
+            <circle
+              cx="22" cy="22" r="18" fill="none"
+              stroke="rgba(255,255,255,0.06)" strokeWidth="3"
+            />
             <circle
               cx="22" cy="22" r="18" fill="none"
               stroke={ringColor} strokeWidth="3" strokeLinecap="round"
               strokeDasharray={circumference} strokeDashoffset={dashOffset}
-              style={{ transition: 'stroke-dashoffset 0.6s ease' }}
+              style={{ transition: 'stroke-dashoffset 0.8s ease' }}
             />
           </svg>
-          <span className="absolute inset-0 flex items-center justify-center text-[11px] font-bold" style={{ color: ringColor }}>
-            {metric.score}
-          </span>
         </div>
       </div>
-      {metric.passed && (
-        <div className="mt-1.5 flex items-center gap-1 text-[9px] text-success">
-          <span className="h-1.5 w-1.5 rounded-full bg-success" />
-          达标
-        </div>
+
+      {/* Evidence / description */}
+      {metric.evidence && (
+        <p className="text-xs text-slate-500 mt-auto line-clamp-2 leading-relaxed">
+          {metric.evidence}
+        </p>
       )}
     </div>
   );

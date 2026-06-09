@@ -501,3 +501,174 @@ def _final_segment(
         "transition": "hard_cut",
         "locked": False,
     }
+
+
+# ── Product name pollution guard tests ──
+
+BEAUTY_POLLUTANTS = [
+    "洗面奶", "洁面", "护肤", "面霜", "精华液", "爽肤水", "乳液",
+    "粉底", "口红", "眼影", "卸妆", "面膜", "防晒霜", "BB霜",
+    "化妆水", "隔离霜", "素颜霜", "气垫", "散粉", "腮红",
+]
+
+FOOD_KEYWORDS = [
+    "食材特写", "酱汁流淌", "冒泡沸腾", "油炸翻滚", "调味撒粉",
+    "拉丝芝士", "切面展示", "麻辣红油", "叠放展示", "手撕特写",
+    "蒸腾热气", "冰霜质感", "颗粒质感", "金黄酥脆", "Q弹质感",
+]
+
+
+def test_extract_product_identity_from_brief():
+    """产品名从 project brief 正确提取"""
+    from services.migrator import _extract_product_identity
+
+    payload = {
+        "project": {
+            "product_info": {
+                "productName": "麻辣王子辣条",
+                "sellingPoints": ["麻辣鲜香", "独立小包装", "追剧必备"],
+                "tone": "食欲大开",
+            },
+        },
+    }
+    identity = _extract_product_identity(payload)
+    assert identity["name"] == "麻辣王子辣条"
+    assert "麻辣鲜香" in identity["points"]
+    assert identity["tone"] == "食欲大开"
+
+
+def test_extract_product_identity_from_structure_meta():
+    """产品名从 structure.meta.productName 正确提取"""
+    from services.migrator import _extract_product_identity
+
+    payload = {
+        "project": {},
+        "structure": {"meta": {"productName": "辣条大礼包 500g"}},
+    }
+    identity = _extract_product_identity(payload)
+    assert identity["name"] == "辣条大礼包 500g"
+
+
+def test_extract_product_identity_rejects_unknown():
+    """未知商品不会被当作有效产品名"""
+    from services.migrator import _extract_product_identity
+
+    for bad_name in ("未知商品", "未识别（无语音）", ""):
+        payload = {
+            "project": {},
+            "structure": {"meta": {"productName": bad_name}},
+        }
+        identity = _extract_product_identity(payload)
+        # Falls back to project name or 未指定产品
+        assert identity["name"] != bad_name
+
+
+def test_food_video_not_polluted_by_beauty_keywords():
+    """食品视频的迁移脚本不应包含美妆品类词汇"""
+    from services.migrator import _extract_product_identity
+
+    # Simulate a food video structure
+    payload = {
+        "project": {
+            "name": "辣条广告视频",
+            "product_info": {
+                "productName": "麻辣辣条",
+                "sellingPoints": ["麻辣口感", "追剧零食"],
+                "tone": "食欲大开",
+            },
+        },
+        "structure": {
+            "meta": {
+                "productName": "麻辣辣条",
+                "duration": 30.0,
+                "resolution": "1080x1920",
+                "shots": 10,
+                "coverLabel": "辣条特写",
+            },
+            "script": [
+                {
+                    "id": "seg-1", "type": "hook",
+                    "copy": "这个辣条真的绝了！",
+                    "visual": "金黄辣条特写，红油闪亮",
+                    "visual_keywords": ["食材特写", "麻辣红油", "金黄酥脆"],
+                },
+            ],
+        },
+    }
+
+    # Verify product identity is food, not beauty
+    identity = _extract_product_identity(payload)
+    assert identity["name"] == "麻辣辣条"
+    for pollutant in BEAUTY_POLLUTANTS:
+        assert pollutant not in identity["name"], f"产品名被污染: {pollutant}"
+
+    # Verify the structure's visual keywords are food-related, not beauty
+    script = payload["structure"]["script"]
+    for seg in script:
+        for kw in seg.get("visual_keywords", []):
+            assert kw in FOOD_KEYWORDS or kw not in [
+                "瓶身特写", "膏体拉丝", "泡沫细腻", "挤压出液"
+            ], f"食品分镜出现美妆关键词: {kw}"
+
+
+def test_build_local_structure_preserves_product_name():
+    """LLM 回退结构应保留从 prompt_context 提取的 productName"""
+    from services.llm_structure import build_local_structure_payload
+
+    # Food context — should preserve product name
+    food_context = {
+        "meta": {
+            "duration": 30.0,
+            "resolution": "1080x1920",
+            "shots": 10,
+            "productName": "麻辣辣条 大包装",
+        },
+    }
+    payload = build_local_structure_payload(food_context)
+    assert payload["meta"]["productName"] == "麻辣辣条 大包装"
+
+    # Empty context — should fall back to 未知商品
+    empty_payload = build_local_structure_payload({})
+    assert empty_payload["meta"]["productName"] == "未知商品"
+
+
+def test_structure_meta_includes_product_name_after_normalization():
+    """_normalize_structure 应为缺失 productName 的结构补上 未知商品"""
+    from models.schemas import VideoStructure
+    from services.llm_structure import _normalize_structure
+
+    payload = {
+        "meta": {"duration": 30.0, "resolution": "1080x1920", "shots": 10, "coverLabel": "test"},
+        "script": [
+            {"id": "seg-1", "type": "hook", "label": "Hook", "start": 0, "end": 3,
+             "duration": 3, "goal": "stop", "copy": "test", "visual": "test",
+             "visual_keywords": ["纯色背景"], "healthScore": 80},
+        ],
+        "rhythm": [
+            {"second": 0, "cuts": 2, "emotion": 0.5},
+            {"second": 5, "cuts": 2, "emotion": 0.5},
+            {"second": 10, "cuts": 2, "emotion": 0.5},
+            {"second": 15, "cuts": 2, "emotion": 0.5},
+            {"second": 20, "cuts": 2, "emotion": 0.5},
+            {"second": 25, "cuts": 2, "emotion": 0.5},
+        ],
+        "packaging": {"subtitleStyle": ["test"], "transitions": ["test"], "overlays": ["test"]},
+        "health": {
+            "hook_strength": 80, "product_exposure_timing": 80,
+            "selling_point_proof": 80, "pacing_compactness": 80,
+            "cta_persuasiveness": 80, "overall": 80,
+        },
+    }
+    structure = VideoStructure.model_validate(payload)
+    normalized = _normalize_structure(structure)
+    assert normalized.meta.productName == "未知商品"
+
+
+def test_food_visual_keywords_exist_in_whitelist():
+    """验证食品关键词已加入白名单（防止回退）"""
+    from services.llm_structure import PROMPT_TEMPLATE
+    for kw in FOOD_KEYWORDS:
+        assert kw in PROMPT_TEMPLATE, (
+            f"食品关键词 '{kw}' 不在 PROMPT_TEMPLATE 白名单中。"
+            f"请在 llm_structure.py 的视觉特征词库中补充。"
+        )

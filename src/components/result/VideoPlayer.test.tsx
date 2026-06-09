@@ -14,6 +14,14 @@ describe('VideoPlayer', () => {
   it('keeps the placeholder player when no src is available', () => {
     render(<VideoPlayer timeline={timeline} />);
 
-    expect(screen.getByRole('button', { name: 'Play' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Volume' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Fullscreen' })).toBeInTheDocument();
+  });
+
+  it('shows blueprint indicator when timeline has draft segments', () => {
+    const draftTimeline = [{ id: 'seg-1', label: 'Hook', start: 0, end: 3, source: 'aigc_draft' as const }];
+    render(<VideoPlayer timeline={draftTimeline} hasDraftSegments />);
+
+    expect(screen.getByText(/AI 蓝图预留位/)).toBeInTheDocument();
   });
 });

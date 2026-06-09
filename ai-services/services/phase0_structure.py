@@ -70,7 +70,7 @@ def detect_subtitle_type(
                 "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": 16,
             },
-            timeout=20,
+            timeout=30,  # was 20 — subtitle detection needs headroom
         )
         response.raise_for_status()
         payload = response.json()
@@ -149,28 +149,16 @@ class StructureOptimizer:
             f"请立即针对该产品构建最优分镜结构线。"
         )
 
+        from services.llm_client import RobustLLMClient, LLMError
+
         for attempt in range(1, 4):
             try:
-                response = httpx.post(
-                    self._endpoint,
-                    headers={"Authorization": f"Bearer {self._api_key}"},
-                    json={
-                        "model": self._model,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_content},
-                        ],
-                        "max_tokens": 1024,
-                        "temperature": 0.3,
-                    },
-                    timeout=30,
+                client = RobustLLMClient(self._endpoint, self._api_key, self._model)
+                content = client.complete_text(
+                    system_prompt + "\n\n" + user_content,
+                    max_tokens=1024,
                 )
-                response.raise_for_status()
-                payload = response.json()
-                content = ""
-                if "choices" in payload:
-                    content = payload["choices"][0].get("message", {}).get("content", "")
-                if not content:
+                if not content or not content.strip():
                     raise ValueError("LLM returned empty response")
 
                 # Parse JSON from response
@@ -211,9 +199,13 @@ class StructureOptimizer:
             except Exception as exc:
                 log.warning("Phase 0 attempt %d failed: %s", attempt, exc)
 
-        # All attempts exhausted — fallback
-        log.warning("Phase 0: all LLM attempts failed, using fallback structure")
-        return _build_fallback_structure(product, user_asset_count)
+        # All attempts exhausted — raise hard error. Structure generation is NOT degradable.
+        from services.llm_client import LLMError
+        raise LLMError(
+            "最优分镜结构生成失败，LLM 调用 3 次全部失败",
+            suggestion="请检查 API Key 和网络连接。如需离线工作，可在前端选择「离线模式」使用规则引擎生成基础结构。",
+            retryable=True,
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════

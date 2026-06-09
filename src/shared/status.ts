@@ -14,4 +14,5 @@ export const sourceMeta: Record<SourceType, { label: string; color: string; bord
   aigc: { label: 'AIGC \u751f\u6210', color: '#C87D53', borderClass: 'border-l-accent' },
   packaging: { label: '\u5305\u88c5\u8865\u5168', color: '#5C8B67', borderClass: 'border-l-primary' },
   recompose: { label: '\u7d20\u6750\u91cd\u7ec4', color: '#7C8BBD', borderClass: 'border-l-[#7C8BBD]' },
+  aigc_draft: { label: 'AI \u84dd\u56fe\u8349\u7a3f', color: '#FFB300', borderClass: 'border-l-[#FFB300]' },
 };

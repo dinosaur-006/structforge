@@ -122,7 +122,16 @@ class AnalysisPipeline:
                 max_attempts=self.settings.llm_max_attempts,
             )
 
-            # Store ASR + Vision diagnostics alongside result for frontend visibility
+            # Store ASR + Vision raw data alongside structure for burst audit
+            vision_frames_raw = vision_result.get("frames", []) if vision_result else []
+            asr_data = asr_result if asr_result else {}
+            self.repository.complete_job(
+                job_id, structure,
+                vision_frames=vision_frames_raw,
+                asr_data=asr_data,
+            )
+
+            # Bind reference video for compositor
             job = self.repository.get_job(job_id)
             if job and job.get("project_id"):
                 project = self.repository.get_project(job["project_id"])
@@ -134,7 +143,6 @@ class AnalysisPipeline:
                         source_path=str(path),
                         structure=structure,
                     )
-            self.repository.complete_job(job_id, structure)
 
             # Non-blocking: cache result for future runs.
             if cache_fingerprint:

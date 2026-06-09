@@ -52,36 +52,31 @@ class ResultEvaluator:
         self._model = llm_model
 
     def qualitative_review(self, script: FinalScript, before_scores: dict[str, int] | None = None) -> dict | None:
-        """Return structured LLM review with specific improvements and expected effects."""
+        """Return structured LLM review via shared RobustLLMClient."""
         if not self._llm_available:
             return None
+
+        from services.llm_client import RobustLLMClient, LLMError
+
         script_summary = "\n".join(
             f"[{s.type}] {s.script[:60]}" for s in script.segments[:5]
         )
         before = before_scores or {}
         try:
-            response = httpx.post(
-                self._endpoint,
-                headers={"Authorization": f"Bearer {self._api_key}"},
-                json={
-                    "model": self._model,
-                    "messages": [{"role": "user", "content": REVIEW_PROMPT.format(
-                        script_summary=script_summary,
-                        hook_before=before.get("hook_strength", "?"),
-                        proof_before=before.get("selling_point_proof", "?"),
-                        cta_before=before.get("cta_persuasiveness", "?"),
-                    )}],
-                    "max_tokens": 256,
-                },
-                timeout=20,
+            client = RobustLLMClient(self._endpoint, self._api_key, self._model)
+            result = client.complete_json(
+                REVIEW_PROMPT.format(
+                    script_summary=script_summary,
+                    hook_before=before.get("hook_strength", "?"),
+                    proof_before=before.get("selling_point_proof", "?"),
+                    cta_before=before.get("cta_persuasiveness", "?"),
+                ),
+                max_tokens=256,
             )
-            response.raise_for_status()
-            payload = response.json()
-            content = ""
-            if "choices" in payload:
-                content = payload["choices"][0].get("message", {}).get("content", "")
-            if content.strip().startswith("{"):
-                return json.loads(_extract_json(content))
+            if isinstance(result, dict):
+                return result
+            if isinstance(result, str) and result.strip().startswith("{"):
+                return json.loads(_extract_json(result))
         except Exception:
             pass
         return None
@@ -112,8 +107,11 @@ class ResultEvaluator:
                     "end": segment.end,
                     "duration": segment.duration,
                     "text": segment.script,
-                    # AI-generated scripts always have content (text + visual descriptions).
-                    "visible": True,
+                    # visible only when segment has a real user asset (not aigc/packaging)
+                    "visible": (
+                        segment.source == "original"
+                        and segment.asset_id is not None
+                    ),
                 }
                 for segment in script.segments
             ]

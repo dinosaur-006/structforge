@@ -32,6 +32,7 @@ class TTSEngine:
         speed: float = 1.0,
         resource_id: str = "seed-tts-1.0",
         ffmpeg_path: str = "ffmpeg",
+        inference_mode: str = "api",
     ) -> None:
         self.endpoint = endpoint or TTS_SSE_URL
         self.api_key = api_key
@@ -40,22 +41,38 @@ class TTSEngine:
         self.speed = max(0.5, min(speed, 2.0))
         self.resource_id = resource_id
         self.ffmpeg_path = shutil.which(ffmpeg_path) or ffmpeg_path
-        self._configured = bool(api_key)
+        self.inference_mode = inference_mode  # "api" | "local"
+        self._configured = bool(api_key) or inference_mode == "local"
 
     @property
     def available(self) -> bool:
         return self._configured
 
     def synthesize(self, text: str, output_path: Path, target_duration: float = 0.0) -> bool:
-        """Generate TTS audio via Volcano SSE API. Returns True on success."""
-        if not self._configured or not text.strip():
+        """Generate TTS audio. Returns True on success.
+
+        Routes to Edge TTS (local, free) or Volcano API based on inference_mode.
+        When target_duration is provided, calculates required speed.
+        """
+        if not text.strip():
+            return False
+        if self.inference_mode == "local":
+            return self._synthesize_local(text, output_path, target_duration)
+        if not self._configured:
             return False
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
+        # ── Dynamic speed based on text length vs target duration ──
+        effective_speed = self.speed
+        if target_duration > 0 and len(text) > 0:
+            chars_per_sec_normal = 4.5  # Chinese TTS baseline
+            normal_duration = len(text) / chars_per_sec_normal
+            required_speed = normal_duration / target_duration
+            effective_speed = min(max(required_speed, 0.8), 1.5)
         # Speech rate: map 0.5–2.0 speed to Volcano's -50..100 range.
-        # speed=1.0 → 0, speed=2.0 → 50 (halfway to max), speed=0.5 → -25
-        speech_rate = int((self.speed - 1.0) * 50)
+        # speed=1.0 → 0, speed=2.0 → 50, speed=0.5 → -25
+        speech_rate = int((effective_speed - 1.0) * 50)
 
         body = {
             "user": {"uid": "structforge"},
@@ -144,3 +161,45 @@ class TTSEngine:
             return float(result.stdout.strip())
         except (ValueError, TypeError):
             return 0.0
+
+    def _synthesize_local(self, text: str, output_path: Path, target_duration: float = 0.0) -> bool:
+        """Edge TTS — free, no API key, Windows built-in engine.
+
+        Uses Microsoft Edge TTS via edge-tts package. Voice quality is
+        comparable to Volcano TTS for Chinese narration.
+        """
+        try:
+            import asyncio as _asyncio
+            import edge_tts as _edge_tts
+        except ImportError:
+            return False
+
+        # Voice mapping: our short names → Edge TTS voice IDs
+        voice_map = {
+            "zh_female_qingxin": "zh-CN-XiaoxiaoNeural",
+            "zh_female_wenrou": "zh-CN-XiaoyiNeural",
+            "zh_male_chenwen": "zh-CN-YunxiNeural",
+            "zh_female_tianmei": "zh-CN-XiaohanNeural",
+        }
+        voice_id = voice_map.get(self.speaker, "zh-CN-XiaoxiaoNeural")
+
+        # Speed → rate conversion for Edge TTS
+        rate_map = {0.8: "-20%", 0.9: "-10%", 1.0: "+0%", 1.1: "+10%",
+                     1.2: "+20%", 1.3: "+30%", 1.5: "+50%"}
+        rate = rate_map.get(round(self.speed, 1), "+0%")
+
+        async def _run():
+            communicate = _edge_tts.Communicate(text, voice_id, rate=rate)
+            await communicate.save(str(output_path))
+
+        try:
+            _asyncio.run(_run())
+        except RuntimeError:
+            # Already in an event loop
+            import asyncio as _aio
+            loop = _aio.get_event_loop()
+            loop.run_until_complete(_run())
+
+        if output_path.exists() and output_path.stat().st_size > 1000:
+            return self._post_process(output_path, target_duration)
+        return False

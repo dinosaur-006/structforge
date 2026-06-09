@@ -1,6 +1,11 @@
 """Async Remotion microservice client for animated overlays.
 
 Falls back to Phase 7 Pillow animations when the service is unavailable.
+
+NOTE (2026-06-10): This module is currently unused. RendererFactory in
+renderer_abstraction.py handles Remotion calls via a different path.
+Keep for future direct Remotion integration or delete if RendererFactory
+fully replaces this.
 """
 
 from __future__ import annotations

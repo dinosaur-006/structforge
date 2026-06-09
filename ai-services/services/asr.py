@@ -29,7 +29,20 @@ def transcribe_video(source_path: Path, job_id: str, settings: Settings) -> dict
         capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
     )
     if extract_result.returncode != 0:
+        import sys
+        sys.stderr.write(f"[ASR] Audio extraction failed: {extract_result.stderr[:200]}\n")
+        sys.stderr.flush()
         return {"asr_status": "failed", "text": "", "segments": [], "error": "Audio extraction failed"}
+
+    # Check that extracted audio is non-trivial (< 1KB usually means no audio stream)
+    audio_size = audio_path.stat().st_size
+    import sys
+    sys.stderr.write(f"[ASR] Extracted audio: {audio_size} bytes ({audio_size/1000:.1f} KB)\n")
+    sys.stderr.flush()
+    if audio_size < 1024:
+        sys.stderr.write("[ASR] Audio too small (< 1KB) — video likely has no audio stream\n")
+        sys.stderr.flush()
+        return {"asr_status": "completed", "text": "", "segments": [], "asr_note": "video has no audio track"}
 
     # Try Volcano BigModel ASR.
     if settings.volcano_asr_api_key:
@@ -132,6 +145,17 @@ def _try_volcano_bigmodel(audio_path: Path, settings: Settings) -> dict[str, Any
 
                 segments = _normalize_utterances(utterances)
                 full_text = " ".join(s["text"] for s in segments)
+                if not full_text.strip():
+                    # API returned success but no actual text — treat as failure
+                    # so the fallback (WhisperX) gets a chance.
+                    import sys
+                    sys.stderr.write(f"[ASR] Volcano BigModel returned empty text, falling back to WhisperX\n")
+                    sys.stderr.flush()
+                    return None
+
+                import sys
+                sys.stderr.write(f"[ASR] Success! Text ({len(full_text)} chars): {full_text[:100]}\n")
+                sys.stderr.flush()
                 return {
                     "asr_status": "completed",
                     "provider": "volcano_bigmodel",

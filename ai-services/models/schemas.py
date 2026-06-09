@@ -308,10 +308,61 @@ class FinalSegment(StrictModel):
 
 
 class FinalScript(StrictModel):
-    version: FinalScriptStyle
+    version: FinalScriptStyle = "default"
     total_duration: float = Field(ge=0)
     segments: list[FinalSegment] = Field(min_length=1)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    timelineSpec: dict[str, Any] | None = None
+
+    @field_validator("version", mode="before")
+    @classmethod
+    def _coerce_missing_version(cls, v: object) -> str:
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return "default"
+        if isinstance(v, str) and v not in (
+            "high_click", "high_conversion", "fast_pace", "high_quality",
+            "xiaohongshu_ces", "wechat_social", "default",
+        ):
+            return "default"
+        return str(v)
+
+    @classmethod
+    def _try_wrap_flat_llm_output(cls, data: dict[str, Any]) -> dict[str, Any]:
+        """Auto-wrap flat LLM output into proper FinalScript structure.
+
+        LLMs often return a flat segment-like object {id, type, start, ...}
+        instead of the full {version, total_duration, segments: [...]} wrapper.
+        Detect this and wrap it automatically so validation passes.
+        """
+        # Already properly structured — return as-is
+        if "segments" in data:
+            # Ensure segments have required defaults
+            for s in (data.get("segments") or []):
+                s.setdefault("source", "original")
+                s.setdefault("subtitle_style", "白字黑边")
+                s.setdefault("transition", "硬切")
+                s.setdefault("locked", False)
+            return data
+
+        # LLM returned a list of segments directly
+        if isinstance(data, list):
+            dur = sum(float(s.get("duration", s.get("end", 0)) - float(s.get("start", 0))) for s in data)
+            return {
+                "version": "default", "total_duration": max(dur, 3.0),
+                "segments": data, "metadata": {"restructure_needed": False,
+                    "edit_reason": "LLM returned segment list, auto-wrapped"},
+            }
+
+        # LLM returned a flat object with segment-like fields
+        if isinstance(data, dict) and "type" in data and "id" in data:
+            dur = float(data.get("duration", data.get("end", 0)) - float(data.get("start", 0)))
+            return {
+                "version": "default", "total_duration": max(dur, 3.0),
+                "segments": [data], "metadata": {"restructure_needed": False,
+                    "edit_reason": "LLM returned flat segment, auto-wrapped"},
+            }
+
+        return data
 
 
 class ResultEvaluation(StrictModel):
@@ -392,3 +443,34 @@ class RenderProgress(StrictModel):
     output_url: str | None = None
     error: str | None = None
     warnings: list[str] = Field(default_factory=list)
+
+
+# ── Blueprint / Pre-viz payload models ──
+
+class BlueprintSegmentPayload(StrictModel):
+    """API payload preview for a single AIGC segment when video gen API is unavailable."""
+    segment_id: str
+    segment_type: str
+    segment_label: str
+    duration: float = Field(ge=0)
+    visual_prompt: str
+    script_text: str
+    camera: str = "静态"
+    visual_fx: str = "无"
+    pace: str = "正常"
+    emotion: str = "亲切"
+    model: str = "doubao-seedance-2-0-260128"
+    estimated_tokens: int = Field(ge=0)
+    estimated_cost_usd: float = Field(ge=0)
+    api_provider: str = "Volcano Ark / Seedance 2.0"
+    is_available: bool = False
+    api_payload: dict[str, object] = Field(default_factory=dict)
+
+
+class BlueprintPayloadsResponse(StrictModel):
+    """Response with all blueprint payloads for a project."""
+    project_id: str
+    video_gen_available: bool
+    payloads: list[BlueprintSegmentPayload] = Field(default_factory=list)
+    total_estimated_cost_usd: float = Field(ge=0, default=0.0)
+    total_estimated_tokens: int = Field(ge=0, default=0)

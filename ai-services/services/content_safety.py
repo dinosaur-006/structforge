@@ -87,7 +87,7 @@ class ContentSafetyService:
                         "messages": [{"role": "user", "content": LLM_REVIEW_PROMPT.format(content=text[:3000])}],
                         "max_tokens": 256,
                     },
-                    timeout=15,
+                    timeout=30,  # was 15 — safety review may need more time
                 )
                 response.raise_for_status()
                 payload = response.json()

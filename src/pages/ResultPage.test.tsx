@@ -6,6 +6,24 @@ import ResultPage from './ResultPage';
 import type { FinalScript } from '../shared/types';
 import { useAppStore } from '../store';
 
+// Helper: mock responses for new blueprint/capability API calls added by ResultPage mount effect.
+function mockCapabilityAndBlueprintResponses(mockChain: ReturnType<typeof vi.mocked<typeof fetch>>) {
+  // capabilities → videoGen unavailable (fallback mode)
+  mockChain.mockResolvedValueOnce(
+    new Response(JSON.stringify({ aigc: { state: 'fallback', label: 'AIGC', detail: 'No API key' } }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  );
+  // blueprint-payloads → empty project (no FinalScript yet)
+  mockChain.mockResolvedValueOnce(
+    new Response(JSON.stringify({ project_id: 'proj-1', video_gen_available: false, payloads: [], total_estimated_cost_usd: 0, total_estimated_tokens: 0 }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  );
+}
+
 const project = { id: 'proj-1', name: 'Headphones', description: '', status: 'editing', updatedAt: '2026-05-23T00:00:00Z' };
 const finalScript: FinalScript = {
   version: 'high_click',
@@ -79,13 +97,17 @@ function renderRoute(path: string) {
 describe('ResultPage', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn());
+    // Clear localStorage to prevent Zustand persist from loading stale state
+    try { localStorage.removeItem('structforge-app-store'); } catch {}
     useAppStore.getState().resetForTest();
   });
 
   afterEach(() => vi.unstubAllGlobals());
 
   it('loads only rule-evaluated generated versions from the API', async () => {
-    vi.mocked(fetch)
+    const mockedFetch = vi.mocked(fetch);
+    mockCapabilityAndBlueprintResponses(mockedFetch);
+    mockedFetch
       .mockResolvedValueOnce(
         new Response(JSON.stringify([project]), {
           status: 200,
@@ -113,7 +135,9 @@ describe('ResultPage', () => {
   });
 
   it('shows a baseline result without requesting a final script that does not exist yet', async () => {
-    vi.mocked(fetch)
+    const mockedFetch = vi.mocked(fetch);
+    mockCapabilityAndBlueprintResponses(mockedFetch);
+    mockedFetch
       .mockResolvedValueOnce(
         new Response(JSON.stringify([project]), {
           status: 200,
@@ -137,7 +161,9 @@ describe('ResultPage', () => {
   });
 
   it('switches evaluated result versions', async () => {
-    vi.mocked(fetch)
+    const mockedFetch = vi.mocked(fetch);
+    mockCapabilityAndBlueprintResponses(mockedFetch);
+    mockedFetch
       .mockResolvedValueOnce(
         new Response(JSON.stringify([project]), {
           status: 200,
@@ -168,7 +194,9 @@ describe('ResultPage', () => {
       ...evaluatedVersions,
       versions: [{ ...evaluatedVersions.versions[0], score: 62, metrics: { ...evaluatedVersions.versions[0].metrics, scoreDelta: -4 } }],
     };
-    vi.mocked(fetch)
+    const mockedFetch = vi.mocked(fetch);
+    mockCapabilityAndBlueprintResponses(mockedFetch);
+    mockedFetch
       .mockResolvedValueOnce(new Response(JSON.stringify([project]), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(JSON.stringify(decreasedVersions), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(JSON.stringify(finalScript), { status: 200, headers: { 'Content-Type': 'application/json' } }));
@@ -182,7 +210,9 @@ describe('ResultPage', () => {
   });
 
   it('renders generated final script timeline when one is available', async () => {
-    vi.mocked(fetch)
+    const mockedFetch = vi.mocked(fetch);
+    mockCapabilityAndBlueprintResponses(mockedFetch);
+    mockedFetch
       .mockResolvedValueOnce(
         new Response(JSON.stringify([project]), {
           status: 200,
@@ -216,7 +246,9 @@ describe('ResultPage', () => {
         edit_reason: '\u4ea7\u54c1\u771f\u5b9e\u9732\u51fa\u8fc7\u665a\uff0c\u9700\u5728 Hook \u540e\u7acb\u5373\u5c55\u793a\u3002',
       },
     };
-    vi.mocked(fetch)
+    const mockedFetch = vi.mocked(fetch);
+    mockCapabilityAndBlueprintResponses(mockedFetch);
+    mockedFetch
       .mockResolvedValueOnce(new Response(JSON.stringify([project]), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(JSON.stringify(evaluatedVersions), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(JSON.stringify(restructuredScript), { status: 200, headers: { 'Content-Type': 'application/json' } }));
@@ -232,7 +264,9 @@ describe('ResultPage', () => {
       ...finalScript,
       segments: [{ ...finalScript.segments[0], source: 'reorder' as const }],
     };
-    vi.mocked(fetch)
+    const mockedFetch = vi.mocked(fetch);
+    mockCapabilityAndBlueprintResponses(mockedFetch);
+    mockedFetch
       .mockResolvedValueOnce(new Response(JSON.stringify([project]), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(JSON.stringify(evaluatedVersions), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(JSON.stringify(legacyScript), { status: 200, headers: { 'Content-Type': 'application/json' } }));
@@ -248,7 +282,9 @@ describe('ResultPage', () => {
       ...finalScript,
       segments: [{ ...finalScript.segments[0], asset_id: 'asset-video', source: 'recompose' }],
     };
-    vi.mocked(fetch)
+    const mockedFetch = vi.mocked(fetch);
+    mockCapabilityAndBlueprintResponses(mockedFetch);
+    mockedFetch
       .mockResolvedValueOnce(
         new Response(JSON.stringify([project]), {
           status: 200,
@@ -285,7 +321,9 @@ describe('ResultPage', () => {
   });
 
   it('starts a render job from the export dialog and passes the output to the player', async () => {
-    vi.mocked(fetch)
+    const mockedFetch = vi.mocked(fetch);
+    mockCapabilityAndBlueprintResponses(mockedFetch);
+    mockedFetch
       .mockResolvedValueOnce(
         new Response(JSON.stringify([project]), {
           status: 200,
@@ -331,7 +369,9 @@ describe('ResultPage', () => {
     const createObjectURL = vi.fn(() => 'blob:script');
     vi.stubGlobal('URL', { createObjectURL, revokeObjectURL: vi.fn() });
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
-    vi.mocked(fetch)
+    const mockedFetch = vi.mocked(fetch);
+    mockCapabilityAndBlueprintResponses(mockedFetch);
+    mockedFetch
       .mockResolvedValueOnce(new Response(JSON.stringify([project]), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(JSON.stringify(evaluatedVersions), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(JSON.stringify(finalScript), { status: 200, headers: { 'Content-Type': 'application/json' } }));
