@@ -1,4 +1,4 @@
-"""Optimization pipeline API endpoint — wires the 6-Phase pipeline into a live route."""
+"""Optimization pipeline API endpoints — waveform, thumbnail, and blueprint previews."""
 
 from __future__ import annotations
 
@@ -7,31 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
 
 from config import Settings
 from models.repository import SQLiteRepository
-from services.optimization_models import PlatformType, ProductProfile, ProductType
-from services.optimization_pipeline import OptimizationPipeline
 
 log = logging.getLogger(__name__)
-
-
-class OptimizeRequest(BaseModel):
-    product_name: str = Field(min_length=1)
-    product_type: str = "other"  # beauty / electronics / food / clothing / other
-    selling_points: list[str] = Field(default_factory=list)
-    target_audience: str = ""
-    offer: str = ""
-    tone: str = ""
-    platform: str = "douyin"
-    version: str = "standard"  # standard / high_click / high_conversion / fast_pace / high_quality
-
-
-class OptimizeResponse(BaseModel):
-    plan: dict[str, Any]
-    success: bool
 
 
 def build_optimize_router(
@@ -45,52 +25,6 @@ def build_optimize_router(
     @router.options("/{rest:path}")
     async def _cors_preflight(rest: str) -> dict[str, str]:
         return {}  # CORSMiddleware on app handles headers
-
-    @router.post("/{project_id}", response_model=OptimizeResponse)
-    async def run_optimization(project_id: str, payload: OptimizeRequest) -> dict[str, Any]:
-        """Execute the full 6-Phase optimization pipeline for a project."""
-        # Validate project exists
-        project = repository.get_project(project_id)
-        if project is None:
-            raise HTTPException(status_code=404, detail="Project not found")
-
-        # Resolve product type
-        try:
-            product_type = ProductType(payload.product_type)
-        except ValueError:
-            product_type = ProductType.OTHER
-
-        # Resolve platform
-        try:
-            platform = PlatformType(payload.platform)
-        except ValueError:
-            platform = PlatformType.DOUYIN
-
-        # Find a sample video path from the project's analysis jobs
-        video_path = _resolve_video_path(repository, project_id)
-
-        # Build product profile
-        product = ProductProfile(
-            name=payload.product_name,
-            product_type=product_type,
-            selling_points=payload.selling_points,
-            target_audience=payload.target_audience,
-            offer=payload.offer,
-            tone=payload.tone or _default_tone(payload.product_type),
-            platform=platform,
-        )
-
-        # Run the 6-phase pipeline
-        try:
-            pipeline = OptimizationPipeline(_settings)
-            plan = pipeline.run(
-                video_path=str(video_path),
-                product=product,
-            )
-            return {"plan": plan.model_dump(), "success": True}
-        except Exception as exc:
-            log.exception("Optimization pipeline failed for project %s", project_id)
-            raise HTTPException(status_code=500, detail=f"优化管道执行失败: {exc}") from exc
 
     @router.get("/{project_id}/waveform")
     async def get_waveform(project_id: str) -> dict[str, Any]:
@@ -237,13 +171,6 @@ def _resolve_video_path(repository: SQLiteRepository, project_id: str) -> Path:
     return _ensure_placeholder_video()
 
 
-def _settings_or_default() -> Settings:
-    try:
-        return Settings()
-    except Exception:
-        return Settings(_env_file="")  # type: ignore[call-arg]
-
-
 _PLACEHOLDER_PATH: Path | None = None
 
 
@@ -272,13 +199,3 @@ def _ensure_placeholder_video() -> Path:
     if out.exists():
         _PLACEHOLDER_PATH = out
     return out
-
-
-def _default_tone(product_type: str) -> str:
-    defaults = {
-        "beauty": "精致专业",
-        "electronics": "科技感",
-        "food": "诱人有食欲",
-        "clothing": "时尚潮流",
-    }
-    return defaults.get(product_type, "专业可信")

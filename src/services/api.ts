@@ -218,10 +218,14 @@ export const api = {
   listProjects: () => request<Project[]>('/api/v1/projects'),
   createProject: (payload: { name: string; description: string; brief?: ProjectBrief }) =>
     request<Project>('/api/v1/projects', { method: 'POST', body: JSON.stringify(payload) }),
-  getProject: (projectId: string) => request<Project>(`/api/v1/projects/${projectId}`),
   updateProject: (projectId: string, payload: { name?: string; description?: string; brief?: ProjectBrief }) =>
     request<Project>(`/api/v1/projects/${projectId}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deleteProject: (projectId: string) => request<void>(`/api/v1/projects/${projectId}`, { method: 'DELETE' }),
+  analyzeProductImage: (projectId: string, file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return request<{status: string; tags: string[]; colors: string[]; description: string; product_type: string}>(`/api/v1/projects/${projectId}/product-image`, { method: 'POST', body: form });
+  },
   startAnalysis: (file: File, projectId?: string) => {
     const form = new FormData();
     form.append('video', file);
@@ -245,21 +249,18 @@ export const api = {
   fixAllGaps: (projectId: string) => request<GapFixAllResponse>(`/api/v1/gaps/${projectId}/fix-all`, { method: 'POST' }),
   migrateScript: (projectId: string, style: FinalScriptStyle = 'default') =>
     request<FinalScript>(`/api/v1/migrate/${projectId}`, { method: 'POST', body: JSON.stringify({ style }) }),
-  migrateVariant: (projectId: string, style: Exclude<FinalScriptStyle, 'default'>) =>
-    request<FinalScript>(`/api/v1/migrate/${projectId}/variant`, { method: 'POST', body: JSON.stringify({ style }) }),
   getFinalScript: (projectId: string) => request<FinalScript>(`/api/v1/migrate/${projectId}`),
   getResultVersions: (projectId: string) => request<ResultVersionsResponse>(`/api/v1/migrate/${projectId}/versions`),
-  startRender: (projectId: string, version: RenderVersion, resolution: RenderResolution = '1080p', scriptVersion?: FinalScriptStyle) =>
+  startRender: (projectId: string, version: RenderVersion, resolution: RenderResolution = '1080p', scriptVersion?: FinalScriptStyle, segmentModes?: Record<string, string>) =>
     request<RenderJobResponse>(`/api/v1/render/${projectId}`, {
       method: 'POST',
-      body: JSON.stringify({ version, resolution, ...(scriptVersion ? { script_version: scriptVersion } : {}) }),
+      body: JSON.stringify({ version, resolution, ...(scriptVersion ? { script_version: scriptVersion } : {}), ...(segmentModes ? { segment_modes: segmentModes } : {}) }),
     }),
   getRenderJob: (jobId: string) => request<RenderProgressResponse>(`/api/v1/render/${jobId}`),
+  upgradeSegmentToVideo: (projectId: string, segmentIndex: number) =>
+    request<{task_id: string; status: string}>(`/api/v1/render/${projectId}/upgrade-to-video/${segmentIndex}`, { method: 'POST' }),
+  getVideoUpgradeStatus: (taskId: string) => request<{status: string; video_url?: string}>(`/api/v1/render/upgrade-status/${taskId}`),
   getStructure: (projectId: string) => request<VideoStructure>(`/api/v1/structure/${projectId}`),
-  replaceStructure: (projectId: string, structure: VideoStructure) =>
-    request<VideoStructure>(`/api/v1/structure/${projectId}`, { method: 'PUT', body: JSON.stringify(structure) }),
-  addSegment: (projectId: string, segment: Partial<ScriptSegment>) =>
-    request<VideoStructure>(`/api/v1/structure/${projectId}/segment`, { method: 'POST', body: JSON.stringify(segment) }),
   updateSegment: (projectId: string, segmentId: string, changes: Partial<ScriptSegment>) =>
     request<VideoStructure>(`/api/v1/structure/${projectId}/segment/${segmentId}`, { method: 'PUT', body: JSON.stringify(changes) }),
   deleteSegment: (projectId: string, segmentId: string) =>
@@ -273,20 +274,6 @@ export const api = {
     request<{ structure: VideoStructure; changes_summary: string }>(`/api/v1/structure/${projectId}/nl-edit`, {
       method: 'POST',
       body: JSON.stringify({ command }),
-    }),
-  runOptimization: (projectId: string, payload: {
-    product_name: string;
-    product_type: string;
-    selling_points: string[];
-    target_audience?: string;
-    offer?: string;
-    tone?: string;
-    platform?: string;
-    version?: string;
-  }) =>
-    request<{ plan: Record<string, unknown>; success: boolean }>(`/api/v1/optimize/${projectId}`, {
-      method: 'POST',
-      body: JSON.stringify(payload),
     }),
   getWaveform: (projectId: string) =>
     request<{ data: number[]; duration: number; labels: Array<{ start: number; end: number; type: string }> }>(`/api/v1/optimize/${projectId}/waveform`),

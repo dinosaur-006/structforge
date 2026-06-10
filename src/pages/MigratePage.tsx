@@ -1,4 +1,4 @@
-import { Loader2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AssetPanel } from '../components/migrate/AssetPanel';
@@ -13,23 +13,15 @@ import type { FinalScriptStyle } from '../shared/types';
 import { useAppStore } from '../store';
 
 const styleOptions: Array<{ value: string; label: string }> = [
-  { value: 'advised', label: '智能建议' },
-  { value: 'click', label: '高点击' },
+  { value: 'advised', label: '标准' },
   { value: 'conversion', label: '高转化' },
-  { value: 'fast', label: '快节奏' },
   { value: 'premium', label: '高质感' },
-  { value: 'xhs', label: '小红书CES破局' },
-  { value: 'wx', label: '视频号社交裂变' },
 ];
 
 const styleMap: Record<string, FinalScriptStyle> = {
   advised: 'default',
-  click: 'high_click',
   conversion: 'high_conversion',
-  fast: 'fast_pace',
   premium: 'high_quality',
-  xhs: 'xiaohongshu_ces',
-  wx: 'wechat_social',
 };
 
 export default function MigratePage() {
@@ -45,6 +37,7 @@ export default function MigratePage() {
   const scriptLoading = useAppStore((s) => s.scriptLoading);
   const assets = useAppStore((s) => s.assets);
   const assetLoading = useAppStore((s) => s.assetLoading);
+  const gaps = useAppStore((s) => s.gaps);
 
   const fetchProjects = useAppStore((s) => s.fetchProjects);
   const loadProjectStructure = useAppStore((s) => s.loadProjectStructure);
@@ -85,20 +78,7 @@ export default function MigratePage() {
     return { productName: productName || '', sellingPoints: points };
   }, [currentStructure, project?.brief, project?.name]);
 
-  // ── Persist suggested brief to store (fires after render) ──
-  useEffect(() => {
-    if (!suggestedBrief || !structureChecked) return;
-    updateProjectBrief(projectId, {
-      productName: suggestedBrief.productName,
-      sellingPoints: suggestedBrief.sellingPoints,
-      targetAudience: project?.brief?.targetAudience || '',
-      offer: project?.brief?.offer || '',
-      tone: project?.brief?.tone || '',
-      mandatoryClaims: project?.brief?.mandatoryClaims || [],
-    });
-  }, [suggestedBrief, structureChecked, projectId, updateProjectBrief, project?.brief]);
-
-  // ── Page load: fetch project, load structure, auto-fix gaps ──
+  // ── Page load: fetch project, load structure ──
   useEffect(() => {
     let cancelled = false;
 
@@ -137,9 +117,9 @@ export default function MigratePage() {
 
   if (routeLoading) {
     return (
-      <section className="mx-auto max-w-[1240px] space-y-5 py-8">
+      <section className="mx-auto max-w-[1240px] px-5 sm:px-6 lg:px-8 py-8 sm:py-12 lg:py-14 space-y-4">
         <WorkflowSteps current="migrate" projectId={projectId} />
-        <div className="flex min-h-[300px] items-center justify-center rounded-lg border border-border bg-card">
+        <div className="flex min-h-[300px] items-center justify-center rounded-xl border border-border/60 bg-white">
           <div className="text-center">
             <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" />
             <p className="mt-3 text-sm text-text-secondary">正在加载项目数据…</p>
@@ -151,7 +131,7 @@ export default function MigratePage() {
 
   if (!currentStructure && structureChecked) {
     return (
-      <section className="mx-auto max-w-[1240px] space-y-5 py-8">
+      <section className="mx-auto max-w-[1240px] px-5 sm:px-6 lg:px-8 py-8 sm:py-12 lg:py-14 space-y-4">
         <ErrorAlert
           title="无法加载项目"
           description="项目不存在或结构数据未初始化，请回到项目列表重试"
@@ -169,9 +149,9 @@ export default function MigratePage() {
   if (!currentStructure) {
     // Edge case: not loading, not checked, but no structure. Show loading.
     return (
-      <section className="mx-auto max-w-[1240px] space-y-5 py-8">
+      <section className="mx-auto max-w-[1240px] px-5 sm:px-6 lg:px-8 py-8 sm:py-12 lg:py-14 space-y-4">
         <WorkflowSteps current="migrate" projectId={projectId} />
-        <div className="flex min-h-[300px] items-center justify-center rounded-lg border border-border bg-card">
+        <div className="flex min-h-[300px] items-center justify-center rounded-xl border border-border/60 bg-white">
           <div className="text-center">
             <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" />
             <p className="mt-3 text-sm text-text-secondary">正在加载…</p>
@@ -182,7 +162,7 @@ export default function MigratePage() {
   }
 
   return (
-    <section className="mx-auto max-w-[1240px] space-y-5 pb-24">
+    <section className="mx-auto max-w-[1240px] px-5 sm:px-6 lg:px-8 pt-8 sm:pt-12 lg:pt-14 pb-28 space-y-4">
       <WorkflowSteps current="migrate" projectId={projectId} />
 
       {/* ── Header ── */}
@@ -192,15 +172,52 @@ export default function MigratePage() {
       />
 
 
+      {/* ── 素材缺口识别 — 赛题展示用 ── */}
+      {gaps.length > 0 && (
+        <div className="rounded-xl border border-border/60 bg-white px-5 py-4">
+          <div className="flex items-center gap-2 mb-3">
+            <AlertTriangle className="h-4 w-4 text-warning" />
+            <h2 className="text-sm font-semibold text-text-primary">素材缺口识别</h2>
+            <span className="text-xs text-text-muted">({gaps.length} 个结构槽位需要素材)</span>
+          </div>
+          <div className="space-y-2">
+            {gaps.map(gap => {
+              const segLabel = {hook:'开头吸引',pain:'痛点场景',product:'产品展示',proof:'信任背书',cta:'转化引导'}[gap.segmentId?.split('-')[1] || ''] || gap.segmentId;
+              const availableStrategies = gap.strategies?.filter((s: any) => s.available) || [];
+              return (
+                <div key={gap.id} className="flex items-start gap-3 rounded-lg border border-border/40 bg-sidebar/50 px-3 py-2.5">
+                  <span className={`mt-0.5 h-2 w-2 rounded-full flex-none ${gap.severity === 'critical' ? 'bg-warning' : 'bg-text-muted'}`} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-text-primary">{gap.severity === 'critical' ? '⚠️ 关键缺口' : '缺口'}: {segLabel}</p>
+                    <p className="text-[11px] text-text-secondary mt-0.5">{gap.description}</p>
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {availableStrategies.map((s: any) => (
+                        <span key={s.id} className="text-[9px] text-accent bg-accent/8 rounded px-1.5 py-0.5">
+                          {s.name}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <p className="mt-3 text-[10px] text-text-muted">
+            渲染时 ComfyUI Flux 将自动为缺失画面生成 AI 图片。上述策略为推荐补全方式，实际渲染使用 AIGC 方案。
+          </p>
+        </div>
+      )}
+
       {/* ── 创作简报（必要的人工输入） ── */}
       <CreativeBriefPanel
         brief={project?.brief}
         suggested={suggestedBrief}
+        projectId={projectId}
         onSave={(brief) => updateProjectBrief(projectId, brief)}
       />
 
       {/* ── AI 自然语言调整（可选） ── */}
-      <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
+      <div className="rounded-xl border border-border/60 bg-card px-5 py-4">
         <p className="mb-3 text-sm text-text-secondary">
           对 AI 生成的结构不满意？用一句话告诉 AI 怎么改：
         </p>
@@ -208,7 +225,7 @@ export default function MigratePage() {
       </div>
 
       {/* ── 素材上传与管理 ── */}
-      <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
+      <div className="rounded-xl border border-border/60 bg-card px-5 py-4">
         <p className="mb-3 text-sm font-medium text-text-primary">
           上传产品素材（可选，上传后可自动匹配空缺分镜，减少 AI 生成需求）
         </p>
@@ -220,8 +237,8 @@ export default function MigratePage() {
         />
       </div>
 
-      {/* ── 底部固定条：唯一主操作 ── */}
-      <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-card/95 px-6 py-4 backdrop-blur shadow-[0_-4px_16px_rgba(0,0,0,0.06)]">
+      {/* ── Bottom action bar ── */}
+      <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-border/40 bg-white/90 px-6 py-3.5 backdrop-blur-xl">
         <div className="mx-auto flex max-w-[1240px] items-center justify-between">
           <p className="text-sm text-text-secondary">
             确认商品信息后，选择风格生成视频脚本
@@ -231,7 +248,7 @@ export default function MigratePage() {
               value={style}
               onChange={(e) => setStyle(e.target.value)}
               aria-label="风格"
-              className="h-10 rounded-lg border border-border bg-sidebar px-3 text-sm font-medium text-text-primary outline-none"
+              className="h-10 rounded-xl border border-border bg-sidebar px-3 text-sm font-medium text-text-primary outline-none"
             >
               {styleOptions.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>

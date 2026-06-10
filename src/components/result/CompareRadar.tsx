@@ -18,7 +18,7 @@ export function CompareRadar({ original, current }: { original: HealthScores; cu
   }));
 
   return (
-    <section className="min-h-[320px] rounded-lg border border-border bg-card p-4 shadow-sm">
+    <section className="min-h-[320px] rounded-xl border border-border bg-card p-4 shadow-sm">
       <h2 className="font-semibold">{'\u7ed3\u6784\u5bf9\u6bd4'}</h2>
       <ResponsiveContainer width="100%" height={320}>
         <RadarChart data={data}>

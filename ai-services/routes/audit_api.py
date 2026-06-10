@@ -85,6 +85,16 @@ def build_audit_router(
                 "product_type": raw.get("product_type", ""),
             })
 
+        # Auto-detect platform from video resolution
+        # Horizontal videos (width > height) are brand ads, not Douyin shorts
+        resolution_str = str(meta.get("resolution", "1080x1920"))
+        try:
+            w, h = resolution_str.split("x")
+            is_horizontal = int(w) > int(h)
+        except (ValueError, TypeError):
+            is_horizontal = False
+        audit_platform = "default" if is_horizontal else "douyin"
+
         report = auditor.audit(
             shots=shots,
             asr_text=asr_text,
@@ -93,6 +103,7 @@ def build_audit_router(
             duration=duration,
             rhythm_points=rhythm,
             packaging=packaging,
+            platform=audit_platform,
         )
 
         return auditor.generate_structured_response(report)

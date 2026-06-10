@@ -26,7 +26,7 @@ export function Modal({ open, title, children, onClose, footer }: OverlayProps) 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-text-primary/35 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-      <div className={cn('w-full max-w-lg rounded-lg border border-border bg-card shadow-soft')}>
+      <div className={cn('w-full max-w-lg rounded-xl border border-border bg-card shadow-soft')}>
         <div className="flex items-center justify-between border-b border-border px-5 py-4">
           <h2 id="modal-title" className="text-lg font-semibold text-text-primary">
             {title}

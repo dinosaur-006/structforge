@@ -14,7 +14,7 @@ export function VideoInfoCard({ structure }: { structure: VideoStructure }) {
       {items.map((item) => {
         const Icon = item.icon;
         return (
-          <div key={item.label} className="rounded-lg border border-border bg-card p-4 shadow-sm">
+          <div key={item.label} className="rounded-xl border border-border/60 bg-white p-4 shadow-sm">
             <Icon className="h-5 w-5 text-primary" />
             <p className="mt-3 text-xs uppercase tracking-wider text-text-secondary">{item.label}</p>
             <p className="mt-1 text-lg font-semibold">{item.value}</p>

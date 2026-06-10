@@ -59,7 +59,7 @@ export function SegmentDrawer({ open, segment, assets, onClose, onApply }: Segme
       <div className="space-y-4">
         <label className="block text-sm font-semibold">
           {'\u7c7b\u578b'}
-          <select value={activeForm.type} onChange={(event) => update('type', event.target.value as SegmentType)} className="mt-2 h-11 w-full rounded-lg border border-border bg-card px-3 outline-none focus:border-primary focus:ring-2 focus:ring-primary/30">
+          <select value={activeForm.type} onChange={(event) => update('type', event.target.value as SegmentType)} className="mt-2 h-11 w-full rounded-xl border border-border bg-card px-3 outline-none focus:border-primary focus:ring-2 focus:ring-primary/30">
             {segmentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
         </label>
@@ -70,27 +70,27 @@ export function SegmentDrawer({ open, segment, assets, onClose, onApply }: Segme
             min="1"
             value={activeForm.duration}
             onChange={(event) => update('duration', Number(event.target.value))}
-            className="mt-2 h-11 w-full rounded-lg border border-border bg-card px-3 outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
+            className="mt-2 h-11 w-full rounded-xl border border-border bg-card px-3 outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
           />
         </label>
         <label className="block text-sm font-semibold">
           {'\u811a\u672c'}
-          <textarea value={activeForm.copy} onChange={(event) => update('copy', event.target.value)} className="mt-2 min-h-24 w-full rounded-lg border border-border bg-card px-3 py-2 outline-none focus:border-primary focus:ring-2 focus:ring-primary/30" />
+          <textarea value={activeForm.copy} onChange={(event) => update('copy', event.target.value)} className="mt-2 min-h-24 w-full rounded-xl border border-border bg-card px-3 py-2 outline-none focus:border-primary focus:ring-2 focus:ring-primary/30" />
         </label>
         <label className="block text-sm font-semibold">
           {'\u753b\u9762\u63cf\u8ff0'}
-          <textarea value={activeForm.visual} onChange={(event) => update('visual', event.target.value)} className="mt-2 min-h-24 w-full rounded-lg border border-border bg-card px-3 py-2 outline-none focus:border-primary focus:ring-2 focus:ring-primary/30" />
+          <textarea value={activeForm.visual} onChange={(event) => update('visual', event.target.value)} className="mt-2 min-h-24 w-full rounded-xl border border-border bg-card px-3 py-2 outline-none focus:border-primary focus:ring-2 focus:ring-primary/30" />
         </label>
         <label className="block text-sm font-semibold">
           {'\u5339\u914d\u7d20\u6750'}
-          <select value={activeForm.assetId ?? ''} onChange={(event) => update('assetId', event.target.value || undefined)} className="mt-2 h-11 w-full rounded-lg border border-border bg-card px-3 outline-none focus:border-primary focus:ring-2 focus:ring-primary/30">
+          <select value={activeForm.assetId ?? ''} onChange={(event) => update('assetId', event.target.value || undefined)} className="mt-2 h-11 w-full rounded-xl border border-border bg-card px-3 outline-none focus:border-primary focus:ring-2 focus:ring-primary/30">
             <option value="">未绑定</option>
             {assets.map((asset) => <option key={asset.id} value={asset.id}>{asset.name}</option>)}
           </select>
         </label>
         <label className="block text-sm font-semibold">
           {'\u5b57\u5e55\u6a21\u677f'}
-          <select value={activeForm.subtitlePreset ?? ''} onChange={(event) => update('subtitlePreset', event.target.value)} className="mt-2 h-11 w-full rounded-lg border border-border bg-card px-3 outline-none focus:border-primary focus:ring-2 focus:ring-primary/30">
+          <select value={activeForm.subtitlePreset ?? ''} onChange={(event) => update('subtitlePreset', event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-border bg-card px-3 outline-none focus:border-primary focus:ring-2 focus:ring-primary/30">
             <option>{'\u9ec4\u5b57\u767d\u63cf\u8fb9'}</option>
             <option>{'\u767d\u5b57\u9ed1\u9634\u5f71'}</option>
             <option>{'\u6781\u7b80\u5c0f\u5b57\u5e55'}</option>
@@ -98,7 +98,7 @@ export function SegmentDrawer({ open, segment, assets, onClose, onApply }: Segme
         </label>
         <label className="block text-sm font-semibold">
           {'\u8f6c\u573a'}
-          <select value={activeForm.transition ?? ''} onChange={(event) => update('transition', event.target.value)} className="mt-2 h-11 w-full rounded-lg border border-border bg-card px-3 outline-none focus:border-primary focus:ring-2 focus:ring-primary/30">
+          <select value={activeForm.transition ?? ''} onChange={(event) => update('transition', event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-border bg-card px-3 outline-none focus:border-primary focus:ring-2 focus:ring-primary/30">
             <option>{'\u786c\u5207'}</option>
             <option>{'\u5de6\u6ed1'}</option>
             <option>{'\u7f29\u653e'}</option>

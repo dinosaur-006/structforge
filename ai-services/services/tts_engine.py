@@ -48,6 +48,20 @@ class TTSEngine:
     def available(self) -> bool:
         return self._configured
 
+    @staticmethod
+    def list_voices() -> list[dict[str, str]]:
+        """Return available Edge TTS voices for the frontend voice selector."""
+        return [
+            {"id": "zh-CN-XiaoxiaoNeural", "name": "晓晓 (女, 清新)", "gender": "female", "lang": "zh-CN"},
+            {"id": "zh-CN-XiaoyiNeural", "name": "晓伊 (女, 温柔)", "gender": "female", "lang": "zh-CN"},
+            {"id": "zh-CN-YunxiNeural", "name": "云希 (男, 沉稳)", "gender": "male", "lang": "zh-CN"},
+            {"id": "zh-CN-YunjianNeural", "name": "云健 (男, 新闻)", "gender": "male", "lang": "zh-CN"},
+            {"id": "zh-CN-XiaohanNeural", "name": "晓涵 (女, 甜美)", "gender": "female", "lang": "zh-CN"},
+            {"id": "zh-CN-YunyangNeural", "name": "云扬 (男, 播报)", "gender": "male", "lang": "zh-CN"},
+            {"id": "en-US-JennyNeural", "name": "Jenny (EN, Female)", "gender": "female", "lang": "en-US"},
+            {"id": "en-US-GuyNeural", "name": "Guy (EN, Male)", "gender": "male", "lang": "en-US"},
+        ]
+
     def synthesize(self, text: str, output_path: Path, target_duration: float = 0.0) -> bool:
         """Generate TTS audio. Returns True on success.
 
@@ -163,18 +177,27 @@ class TTSEngine:
             return 0.0
 
     def _synthesize_local(self, text: str, output_path: Path, target_duration: float = 0.0) -> bool:
-        """Edge TTS — free, no API key, Windows built-in engine.
+        """Edge TTS — free, no API key, with exponential backoff retry + rate limiting.
 
-        Uses Microsoft Edge TTS via edge-tts package. Voice quality is
-        comparable to Volcano TTS for Chinese narration.
+        Uses Microsoft Edge TTS via edge-tts package. Implements Pixelle-Video's
+        retry pattern: up to 5 attempts with exponential backoff + jitter,
+        global semaphore to prevent rate-limit 401 errors.
         """
+        import asyncio as _asyncio
+        import random as _random
+        import time as _time
+
         try:
-            import asyncio as _asyncio
             import edge_tts as _edge_tts
         except ImportError:
             return False
 
-        # Voice mapping: our short names → Edge TTS voice IDs
+        # ── Global semaphore: max 3 concurrent Edge TTS requests ──
+        _MAX_CONCURRENT = 3
+        if not hasattr(self, '_edge_semaphore'):
+            self._edge_semaphore = _asyncio.Semaphore(_MAX_CONCURRENT)  # type: ignore[attr-defined]
+
+        # Voice mapping
         voice_map = {
             "zh_female_qingxin": "zh-CN-XiaoxiaoNeural",
             "zh_female_wenrou": "zh-CN-XiaoyiNeural",
@@ -183,22 +206,51 @@ class TTSEngine:
         }
         voice_id = voice_map.get(self.speaker, "zh-CN-XiaoxiaoNeural")
 
-        # Speed → rate conversion for Edge TTS
+        # Speed → rate conversion
         rate_map = {0.8: "-20%", 0.9: "-10%", 1.0: "+0%", 1.1: "+10%",
                      1.2: "+20%", 1.3: "+30%", 1.5: "+50%"}
         rate = rate_map.get(round(self.speed, 1), "+0%")
 
-        async def _run():
-            communicate = _edge_tts.Communicate(text, voice_id, rate=rate)
-            await communicate.save(str(output_path))
+        # ── Retry with exponential backoff + jitter ──
+        _MAX_RETRIES = 5
+        _BASE_DELAY = 1.0
+        _MAX_DELAY = 15.0
+
+        async def _run_with_retry():
+            async with self._edge_semaphore:  # type: ignore[attr-defined]
+                # Brief delay between requests to avoid rate limiting
+                await _asyncio.sleep(0.3)
+
+                last_error = None
+                for attempt in range(1, _MAX_RETRIES + 1):
+                    try:
+                        communicate = _edge_tts.Communicate(text, voice_id, rate=rate)
+                        await communicate.save(str(output_path))
+                        if output_path.exists() and output_path.stat().st_size > 1000:
+                            return  # Success
+                        last_error = Exception("Edge TTS produced empty or invalid output")
+                    except Exception as _exc:
+                        last_error = _exc
+                        # Classify error: network errors → retry; auth errors → fail fast
+                        err_str = str(_exc).lower()
+                        if any(kw in err_str for kw in ('401', 'unauthorized', 'forbidden')):
+                            raise  # Don't retry auth errors
+
+                    if attempt < _MAX_RETRIES:
+                        delay = min(_BASE_DELAY * (2 ** (attempt - 1)) + _random.uniform(0, 1.0), _MAX_DELAY)
+                        await _asyncio.sleep(delay)
+
+                if last_error:
+                    raise last_error
 
         try:
-            _asyncio.run(_run())
+            _asyncio.run(_run_with_retry())
         except RuntimeError:
-            # Already in an event loop
             import asyncio as _aio
             loop = _aio.get_event_loop()
-            loop.run_until_complete(_run())
+            loop.run_until_complete(_run_with_retry())
+        except Exception:
+            return False
 
         if output_path.exists() and output_path.stat().st_size > 1000:
             return self._post_process(output_path, target_duration)

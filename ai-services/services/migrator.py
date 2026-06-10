@@ -13,7 +13,6 @@ from services.gap_detector import GapDetector
 from services.llm_structure import DoubaoSeedClient, JsonCompletionClient, StructureExtractionError
 from services.reference_assets import bind_reference_video_asset
 from services.result_evaluator import ResultEvaluator
-from services.transition_advisor import TransitionAdvisor
 from services.content_safety import ContentSafetyService
 from services.overlay_advisor import OverlayAdvisor
 
@@ -24,12 +23,40 @@ STYLE_INSTRUCTIONS: dict[str, str] = {
     "high_conversion": "强化信任背书、优惠理由和 CTA 紧迫感，结尾转化动作更明确。",
     "fast_pace": "整体文案更短，镜头节奏更快，转场更紧凑，但总时长仍需匹配结构。",
     "high_quality": "文案更精致克制，画面描述增加光影、材质和高级感，转场更平滑。",
-    "xiaohongshu_ces": """小红书 CES 算法优化版。算法权重：关注8分>评论/转发4分>点赞/收藏1分。
-强制要求：正文总文案量需达600字以上。Hook和Pain段必须使用"争议性提问"拉动评论互动（如"原来这种护肤方式真的是智商税吗？"）。
-CTA段必须加入互动引导（如"评论区告诉我你的肤质，我帮你选"）或抽奖福利话术。整体调性偏向精致生活美学。""",
-    "wechat_social": """微信视频号社交裂变版。视频号极度依赖"朋友♡"社交分发链。
-强制要求：在Proof或CTA段挂载高价值的"社交资产卡片"——可以是行业避坑指南、全网价格对比清单、或知识思维导图。
-文案中需植入"转发给XX朋友"的社交裂变引导语。整体调性偏向真实可靠、有干货密度，让用户产生"不转就亏了"的冲动。""",
+    "xiaohongshu_ces": """小红书 CES 算法优化版。Hook和Pain段使用争议性提问。CTA段加互动引导。""",
+    "wechat_social": """微信视频号社交裂变版。Proof/CTA段挂载社交资产卡片。文案植入转发引导。""",
+}
+
+# ── Quantified style parameters (replaces vague natural language) ──
+STYLE_PARAMS: dict[str, dict] = {
+    "default": {},
+    "high_click": {
+        "hook_duration_max_s": 2.0,
+        "hook_camera_prefer": "快推",
+        "hook_emotion_prefer": "惊讶",
+        "hook_subtitle_anim": "弹入",
+        "hook_pace": "快",
+        "hook_visual_fx": "震屏",
+    },
+    "high_conversion": {
+        "cta_duration_max_s": 3.0,
+        "cta_emotion_prefer": "紧迫",
+        "cta_pace": "快",
+        "cta_subtitle_anim": "缩放出现",
+        "proof_count_min": 3,
+    },
+    "fast_pace": {
+        "hook_duration_max_s": 2.0,
+        "all_shot_count_increase": 1,
+        "all_pace_default": "快",
+        "all_subtitle_anim": "弹入",
+    },
+    "high_quality": {
+        "all_pace_default": "正常",
+        "all_emotion_prefer": "亲切",
+        "all_camera_prefer": "缓推",
+        "all_visual_fx": "无",
+    },
 }
 
 
@@ -91,19 +118,6 @@ class MigratorService:
         assets = self.repository.list_assets(project_id)
         gaps = self.gap_detector.detect(project_id)
 
-        # ── Load burst audit data so the LLM can target specific weaknesses ──
-        audit_context: dict[str, Any] = {}
-        try:
-            from services.burst_auditor import BurstAuditor
-            auditor = BurstAuditor(
-                llm_endpoint=self.settings.doubao_llm_endpoint,
-                llm_api_key=self.settings.doubao_llm_api_key,
-                llm_model=self.settings.doubao_llm_model,
-            )
-            audit_context = _build_audit_summary(auditor, structure, assets)
-        except Exception:
-            pass  # audit is advisory; migration proceeds without it
-
         # Slim the structure for the prompt — full model_dump includes
         # visual_keywords arrays that bloat the prompt to 5000+ tokens.
         # Keep only the fields the LLM actually needs for migration.
@@ -118,6 +132,8 @@ class MigratorService:
                     "start": s.start, "end": s.end, "duration": s.duration,
                     "goal": s.goal, "copy": s.copy_text, "visual": s.visual,
                     "healthScore": s.healthScore,
+                    "shot_count": getattr(s, "shot_count", None),
+                    "avg_shot_duration": getattr(s, "avg_shot_duration", None),
                 }
                 for s in structure.script
             ],
@@ -132,7 +148,7 @@ class MigratorService:
             },
             "style": style,
             "style_instruction": STYLE_INSTRUCTIONS[style],
-            "audit": audit_context,  # burst audit findings → targeted optimization
+            "style_params": STYLE_PARAMS.get(style, {}),
             "structure": slim_structure,
             "original_scores": {
                 "hook_strength": structure.health.hook_strength,
@@ -153,21 +169,7 @@ class MigratorService:
         }
         script = self._generate_with_retries(prompt_context, style, structure, assets, warnings)
 
-        # Post-process: enrich with transition recommendations.
-        transition_advisor = TransitionAdvisor(
-            llm_endpoint=self.settings.doubao_llm_endpoint,
-            llm_api_key=self.settings.doubao_llm_api_key,
-            llm_model=self.settings.doubao_llm_model,
-        )
-        seg_dicts = [s.model_dump(mode="json") for s in script.segments]
-        trans_recs = transition_advisor.recommend_for_script(seg_dicts)
-        for seg in script.segments:
-            if seg.id in trans_recs and trans_recs[seg.id]:
-                best = trans_recs[seg.id][0]
-                if not seg.transition or seg.transition == "硬切":
-                    seg.transition = best["transition"]
-
-        # Enrich with overlay recommendations.
+        # Enrich with overlay recommendations (rule-based, no LLM).
         overlay_advisor = OverlayAdvisor()
         seg_dicts_for_overlay = [s.model_dump(mode="json") for s in script.segments]
         overlay_recs = overlay_advisor.recommend_for_script(seg_dicts_for_overlay)
@@ -191,28 +193,40 @@ class MigratorService:
             if result.blocked:
                 raise MigrationError(f"内容安全检查阻止: {'; '.join(result.blocked)}")
 
-        # Attach structured LLM qualitative review to script metadata.
-        # Use rule-based baseline evaluation scores (same engine as the page display),
-        # NOT the LLM analysis health scores, so numbers are consistent.
-        baseline_eval = self.evaluator.evaluate_baseline(structure)
-        review = self.evaluator.qualitative_review(script, before_scores={
-            "hook_strength": baseline_eval.health.hook_strength,
-            "selling_point_proof": baseline_eval.health.selling_point_proof,
-            "cta_persuasiveness": baseline_eval.health.cta_persuasiveness,
-        })
-        if review:
-            existing_meta = dict(script.metadata or {})
-            existing_meta["ai_review"] = review
-            script.metadata = existing_meta
-
         # ── Inject product identity into script metadata ──
         # This allows compositor to read product_name/type when calling AIVideoService
         product_identity = _extract_product_identity(prompt_context)
         existing_meta = dict(script.metadata or {})
         existing_meta.setdefault("productName", product_identity.get("name", ""))
         existing_meta.setdefault("productType", product_identity.get("category", "其他"))
-        script.metadata = existing_meta
+        # Pass product image visual analysis to the render pipeline for Flux prompts
+        project_brief = project.get("brief") or {}
+        if isinstance(project_brief, dict) and project_brief.get("_productVisual"):
+            existing_meta["productVisual"] = project_brief["_productVisual"]
 
+        # Pre-generate Flux prompts for frontend display (rule-based, instant)
+        try:
+            from services.flux_prompt_generator import FluxPromptGenerator
+            prompt_gen = FluxPromptGenerator(self.settings)
+            product_visual = existing_meta.get("productVisual") or {}
+            prompts_list = []
+            for seg in script.segments:
+                p = prompt_gen.generate(
+                    segment_type=seg.type, script=seg.script or "",
+                    visual=seg.visual or "", camera=getattr(seg, 'camera', '静态') or '静态',
+                    emotion=getattr(seg, 'emotion', '亲切') or '亲切',
+                    duration=float(seg.duration), product_name=product_identity.get("name", ""),
+                    product_type=product_identity.get("category", "其他"),
+                    product_vision_tags=product_visual.get("tags") if isinstance(product_visual, dict) else None,
+                    product_vision_colors=product_visual.get("colors") if isinstance(product_visual, dict) else None,
+                    width=1080, height=1920,
+                )
+                prompts_list.append({"segment_id": seg.id, "type": seg.type, "prompt": p})
+            existing_meta["prompts"] = prompts_list
+        except Exception:
+            pass  # non-critical
+
+        script.metadata = existing_meta
         self.repository.save_project_script(project_id, script)
         self.repository.save_script_version(project_id, script, self.evaluator.evaluate_script(script))
         return script
@@ -395,53 +409,6 @@ def _extract_product_identity(payload: dict[str, Any]) -> dict[str, str]:
     return {"name": "未指定产品", "category": "未分类", "points": "未指定", "tone": "专业可信"}
 
 
-def _build_audit_summary(auditor: Any, structure: VideoStructure, assets: list[dict[str, Any]]) -> dict[str, Any]:
-    """Run a lightweight audit and return a compact summary for the migration prompt.
-
-    Only runs the rule-based metrics (no LLM call) to keep it fast.
-    Returns empty dict if audit can't run.
-    """
-    try:
-        from services.burst_metrics import BurstMetricsCalculator
-
-        shots = [
-            {"start_s": float(s.start), "end_s": float(s.end),
-             "duration_s": float(s.duration), "type": s.type}
-            for s in structure.script
-        ]
-        vision_frames = [
-            {"index": i+1, "tags": getattr(s, "visual_keywords", []) or [],
-             "ocr": [], "description": s.visual, "dominant_colors": []}
-            for i, s in enumerate(structure.script)
-        ]
-        calc = BurstMetricsCalculator(
-            shots=shots, asr_text="", asr_segments=[],
-            vision_frames=vision_frames, duration=structure.meta.duration,
-            rhythm_points=structure.rhythm, packaging=structure.packaging,
-            platform="douyin",
-        )
-        dimensions = calc.dimension_reports()
-
-        # Extract top 3 actionable weaknesses
-        weaknesses = []
-        for dim in sorted(dimensions, key=lambda d: d.score):
-            for w in dim.weaknesses[:1]:
-                weaknesses.append({"dimension": dim.name, "score": dim.score, "weakness": w})
-
-        # Extract auto-fix patches
-        patches = calc.generate_auto_fix_patches()[:3]
-
-        return {
-            "weakest_dimensions": weaknesses[:3],
-            "auto_fix_suggestions": [
-                {"target": p["metric_name"], "action": p["action"]} for p in patches
-            ],
-            "overall_rule_score": sum(d.score for d in dimensions) // max(len(dimensions), 1),
-        }
-    except Exception:
-        return {}
-
-
 def _product_info(project: dict[str, Any]) -> tuple[str | dict[str, Any], list[str]]:
     brief = project.get("brief") or {}
     if str(brief.get("productName") or "").strip() or list(brief.get("sellingPoints") or []):
@@ -478,10 +445,18 @@ def _build_prompt(context: dict[str, Any], attempt: int) -> str:
     payload["attempt"] = attempt
 
     # ── Extract product identity for explicit injection ──
-    # The LLM must see the product name in the prompt text itself, not just
-    # in the JSON context. Otherwise beauty-biased visual keywords in the
-    # structure can cause the model to hallucinate a different product.
     product_identity = _extract_product_identity(payload)
+
+    # ── Build L2 rhythm data for prompt injection ──
+    rhythm_items = []
+    for s in payload.get("structure", {}).get("script", []):
+        sc = getattr(s, "shot_count", None) if isinstance(s, dict) else s.get("shot_count")
+        avg = getattr(s, "avg_shot_duration", None) if isinstance(s, dict) else s.get("avg_shot_duration")
+        avg_str = f"{avg:.1f}s" if avg else "?"
+        rhythm_items.append({"id": s.get("id", s.id if hasattr(s, 'id') else '?'),
+                             "type": s.get("type", s.type if hasattr(s, 'type') else '?'),
+                             "shot_count": sc or "?", "avg_shot": avg_str})
+    rhythm_json = json.dumps(rhythm_items, ensure_ascii=False, indent=2)
 
     return f"""
 你是 StructForge 的首席视频脚本导演，你的任务是将爆款样例视频的**结构骨架和创作方法**迁移到新产品上，生成一条比原视频**更具爆款潜力**的新脚本。
@@ -521,44 +496,29 @@ def _build_prompt(context: dict[str, Any], attempt: int) -> str:
 
 **重要：script字段只写口播文案本身，不要在里面加【镜】【字】等标记。这些参数用独立的JSON字段输出。**
 
-## 分镜类型详解
+## 分镜类型速查
 
-### Hook（开头吸引，3-5秒）
-- **目标**: 0.3秒内让用户停下划动的手指
-- **手法**: 认知冲突/反常识/悬念/强烈的视觉冲击
-- **文案风格**: 短促有力，一句制造好奇。"等等...这不可能"、"他们不想让你知道这个"、"我测了47款，只有它..."
-- **制作建议**: camera=快推, subtitle_anim=弹入, pace=快, emotion=惊讶/紧迫, visual_fx=震屏
-- **致命错误**: 以品牌Logo开头、慢镜头、问候语
+| 类型 | 相机 | 情绪 | 语速 | 特效 | 文案要点 |
+|------|------|------|------|------|------|
+| Hook(≤3s) | 快推 | 惊讶 | 快 | 震屏 | 认知冲突, 0.3秒停滑, 短促冲击力 |
+| Pain(3-5s) | 缓推 | 亲切 | 正常 | 无 | 具体场景共鸣, 第一人称, 让用户对号入座 |
+| Product(≤5s) | 缓推 | 兴奋 | 正常 | 放大 | 英雄镜头, 具体可感知特性 |
+| Proof(5-8s) | 横移 | 权威 | 正常 | 慢动作 | 对比/数据/实测证据 |
+| CTA(≤4s) | 快推 | 紧迫 | 快 | 放大 | 行动指令+稀缺+零风险, 短句连续轰炸 |
 
-### Pain（痛点放大，3-5秒）
-- **目标**: 让用户对号入座，产生"这就是我的问题"
-- **手法**: 具体场景描述、身体感受、情绪共鸣
-- **文案风格**: 第一人称或第二人称，描述一个具体的、熟悉的不便场景
-- **制作建议**: camera=缓推/横移, subtitle_anim=淡入, pace=正常, emotion=亲切/共鸣
-- **致命错误**: 泛泛而谈、说教、统计数据开场
+硬性约束: Product段start≤5s, CTA段duration≤4s. Hook/CTA禁止静态镜头.
 
-### Product（产品引入，4-8秒）
-- **目标**: 产品作为痛点的自然解决方案出现
-- **硬性约束: product段的start时间必须≤5秒**（平台数据显示产品首次露出>5秒则转化率暴跌）
-- **手法**: 英雄镜头展示、使用场景、质感特写
-- **文案风格**: 具体、可感知的产品特性，避免空洞形容词
-- **制作建议**: camera=缓推/拉远, subtitle_anim=缩放出现, pace=正常, emotion=兴奋/亲切, visual_fx=放大
-- **致命错误**: 罗列参数、说"高品质""行业领先"、没有视觉冲击力
+## 原视频镜头节奏（L2 结构） — 不可丢失
 
-### Proof（卖点证明，5-8秒）
-- **目标**: 用无可辩驳的证据摧毁购买疑虑
-- **手法**: 对比演示、数据可视化、实测镜头、用户证言
-- **文案风格**: 具体的数字、对比结果、可验证的声明。"用分贝仪实测"、"左vs右对比"、"7天前后"
-- **制作建议**: camera=横移/静态, subtitle_anim=逐字出现, pace=正常, emotion=权威/兴奋, visual_fx=慢动作
-- **致命错误**: 纯断言无证据、"你一定会喜欢"、没有具体数据
+以下数据来自帧级场景检测，记录了原视频每段的镜头数和平均镜头时长：
+{rhythm_json}
 
-### CTA（转化号召，3-4秒）
-- **目标**: 创造立即行动的紧迫感
-- **硬性约束: CTA段 duration 必须≤4秒**（行业数据：>4秒的CTA转化率断崖下跌）
-- **手法**: 具体的行动指令+稀缺性+零风险承诺+情感共鸣
-- **文案风格**: 短句连续轰炸，层层递进。"只剩XX单"、"点击下方"、"不满意全额退"、"别让你的XX继续XX"
-- **制作建议**: camera=快推, subtitle_anim=缩放出现, pace=快, emotion=紧迫/兴奋, visual_fx=放大/震屏
-- **致命错误**: 模糊的"快来买吧"、没有紧迫感、没有具体指令、**时长超过4秒**
+**节奏迁移规则**：
+- Hook段必须保持快节奏（shot_count≥2，avg_shot≤1.5s）
+- Pain段可适度放缓（avg_shot 1.5-2.5s），给用户共鸣空间
+- Product段需展示细节（avg_shot≥2s），给画面停留时间
+- CTA段必须快切（shot_count≥2，avg_shot≤1.5s）
+- 新脚本中薄弱段落的 shot_count 应比原视频增加 1-2 个镜头以提升节奏
 
 ## 原视频健康度诊断
 
@@ -572,17 +532,14 @@ def _build_prompt(context: dict[str, Any], attempt: int) -> str:
 
 最薄弱维度: {json.dumps(payload.get('original_scores', {}).get('weakest_dimensions', []), ensure_ascii=False)}
 
-## 爆款审计的针对性优化指令（硬性要求）
+## 创作指导
 
-以下是从 32 项量化指标审计中提取的具体改进方向。**你必须在脚本中针对每一条做出可验证的改进**，不能仅靠通用文案：
+原视频的 LLM 健康度评分指出了相对薄弱的维度。请在生成新脚本时：
+- 重点关注薄弱维度的改进
+- 保持原视频在优势维度上的表现
+- 根据产品特性调整分镜类型的制作参数（已在分镜速查表中指定）
 
-{json.dumps(payload.get('audit', {}).get('weakest_dimensions', []), ensure_ascii=False, indent=2)}
-
-自动修复建议: {json.dumps(payload.get('audit', {}).get('auto_fix_suggestions', []), ensure_ascii=False, indent=2)}
-
-规则量化综合分: {payload.get('audit', {}).get('overall_rule_score', 'N/A')}
-
-**你必须重点强化这些薄弱维度。** 规则引擎已经给出了具体的改进方向，你的脚本必须在对应的分镜中使用更强的制作手法和更精准的文案来执行这些改进。
+你需要运用自己的爆款创作知识，结合原视频的结构数据，自主判断如何优化每个分镜。
 
 ## 品牌调性与情绪共鸣参数
 
@@ -598,6 +555,17 @@ def _build_prompt(context: dict[str, Any], attempt: int) -> str:
 这些参数会联动下游渲染引擎自动匹配 BGM、滤镜和运镜风格。
 
 ## 风格指令: {payload.get('style_instruction', '')}
+
+## 风格量化参数（硬性约束，必须执行）
+
+以下参数来自用户选择的风格，**不是建议而是要求**。你必须按照这些参数设定对应的分镜字段：
+{json.dumps(payload.get('style_params', {}), ensure_ascii=False, indent=2)}
+
+参数说明：
+- hook_duration_max_s: Hook段最长时间（超过则不合格）
+- hook_camera_prefer: Hook段优先使用的运镜
+- cta_duration_max_s: CTA段最长时间
+- all_*: 所有段落的默认值
 
 ## 输出格式
 严格JSON，所有文案必须是口语化中文，脚本中的人称和语气贴近目标受众。
@@ -631,7 +599,13 @@ def _build_prompt(context: dict[str, Any], attempt: int) -> str:
     "warnings": [string],
     "generated_at": string,
     "brand_vibe": "品牌调性（治愈解压/精致专业/科技未来感/时尚潮流/沉浸式生活美学）",
-    "emotional_resonance": "情绪共鸣（高能炸裂/温馨治愈/紧迫焦虑/精致共鸣/干货信赖/专业亲切）"
+    "emotional_resonance": "情绪共鸣（高能炸裂/温馨治愈/紧迫焦虑/精致共鸣/干货信赖/专业亲切）",
+    "migration_strategy": {{
+      "preserved": ["列出你从原视频保留的结构特征，如'Hook段快节奏2镜头模式'、'CTA段紧迫感'"],
+      "strengthened": ["列出你在新脚本中强化的特征及原因，如'产品露出从8s提前到5s——原视频healthScore显示产品露出时机=58分'"],
+      "changed": ["列出你主动改变的特征及理由，如'Pain段从5段压缩为3段——原视频节奏紧凑度=70分'"],
+      "strategy_brief": "一句话总结你的迁移策略"
+    }}
   }},
   "timelineSpec": {{
     "composition": {{"fps": 30, "width": 1080, "height": 1920, "totalFrames": number, "durationSeconds": number}},
@@ -650,6 +624,7 @@ def _build_prompt(context: dict[str, Any], attempt: int) -> str:
 - 每个分镜的script是干净的口播文案，不含任何符号标记
 - 结构重排必须有edit_reason说明理由
 - **你的目标是生成一条比原视频更可能成为爆款的脚本。如果原视频某项得分低于60，你必须在该维度上给出明显更强的方案**
+- **metadata.migration_strategy 必须认真填写** — 这是评审考核的关键指标。preserved 至少列出 2 项，strengthened 至少列出 2 项并注明原因（引用具体 healthScore 数据），changed 至少列出 1 项并说明理由
 
 输入上下文：
 {json.dumps(payload, ensure_ascii=False, indent=2)}
@@ -805,6 +780,15 @@ def _normalize_script(
                     "pace": "正常", "emotion": "亲切", "visual_fx": "无",
                 })
         payload["segments"] = mapped
+        # ── Quality gate: replace filler/short segments with template content ──
+        for seg in payload["segments"]:
+            script_text = str(seg.get("script", "")).strip()
+            if len(script_text) < 5:
+                tmpl = template_by_id.get(seg["id"])
+                if tmpl:
+                    seg["script"] = tmpl.copy_text or f"{tmpl.label} 内容"
+                    seg["visual"] = tmpl.visual or f"{tmpl.label} 画面"
+            seg["duration"] = max(float(seg.get("duration", 2.0)), 1.5)
         base_warnings.append(f"LLM返回{len(llm_segments)}个分镜，已自动映射到结构的{len(structure_ids)}个分镜")
         generated_segments = {segment["id"]: segment for segment in payload["segments"]}
     restructure_applied = _ai_requests_restructure(payload.get("metadata"))
@@ -846,6 +830,8 @@ def _normalize_script(
             segment["source_end"] = None
         # ── Backward compat: extract 5-params from script if new fields are empty ──
         _extract_params_from_script(segment)
+        # ── Enforce per-type defaults when LLM returns generic "静态" ──
+        _apply_type_defaults(segment)
 
     payload["total_duration"] = _reflow_output_timeline(payload["segments"])
     if structure_duration > 0 and abs(payload["total_duration"] - structure_duration) / structure_duration > 0.25:
@@ -854,14 +840,18 @@ def _normalize_script(
     for index, segment in enumerate(payload["segments"]):
         asset_id = segment.get("asset_id")
         if asset_id:
-            origin = asset_by_id[asset_id].get("origin") or "uploaded"
-            if origin == "uploaded":
-                segment["source"] = "reorder" if baseline_positions.get(segment["id"]) != index else "original"
+            asset = asset_by_id[asset_id]
+            # Reference video assets should NOT be treated as user content
+            if _is_reference_asset(asset):
+                segment["source"] = "aigc"
             else:
-                segment["source"] = origin
+                origin = asset.get("origin") or "uploaded"
+                if origin == "uploaded":
+                    segment["source"] = "reorder" if baseline_positions.get(segment["id"]) != index else "original"
+                else:
+                    segment["source"] = origin
         else:
-            segment["source"] = "packaging"
-            warnings.append(f"segment {segment['id']} 无绑定素材，渲染将使用可见包装占位卡")
+            segment["source"] = "aigc"
 
     metadata = dict(payload.get("metadata") or {})
     existing_warnings = metadata.get("warnings") or []
@@ -907,6 +897,33 @@ def _reflow_output_timeline(segments: list[dict[str, Any]]) -> float:
         cursor = round(cursor + duration, 3)
         segment["end"] = cursor
     return cursor
+
+
+def _apply_type_defaults(segment: dict[str, Any]) -> None:
+    """Enforce per-segment-type camera/emotion defaults when LLM returned generic values.
+
+    The LLM prompt includes per-type suggestions but often defaults to '静态'/'亲切'.
+    This post-processing ensures Hook/CTA use dynamic camera work.
+    """
+    seg_type = segment.get("type", "")
+    current_camera = segment.get("camera", "静态")
+
+    # Only override if the LLM returned the generic default
+    if current_camera == "静态":
+        TYPE_CAMERA: dict[str, str] = {
+            "hook": "快推", "cta": "快推", "product": "缓推",
+            "pain": "缓推", "proof": "横移",
+        }
+        if seg_type in TYPE_CAMERA:
+            segment["camera"] = TYPE_CAMERA[seg_type]
+
+    current_emotion = segment.get("emotion", "亲切")
+    if current_emotion == "亲切":
+        TYPE_EMOTION: dict[str, str] = {
+            "hook": "惊讶", "cta": "紧迫", "proof": "权威",
+        }
+        if seg_type in TYPE_EMOTION:
+            segment["emotion"] = TYPE_EMOTION[seg_type]
 
 
 def _extract_params_from_script(segment: dict[str, Any]) -> None:

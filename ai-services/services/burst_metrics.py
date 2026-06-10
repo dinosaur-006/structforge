@@ -93,11 +93,35 @@ CTA_WORDS = re.compile(
     r"只剩|错过|不再|赶紧|立刻|马上|点击下方|小黄车|链接"
 )
 
-# ── Selling point word bank ──
+# ── Selling point word bank (generic) ──
 SELLING_POINT_WORDS = re.compile(
     r"改善|提升|减少|降低|持久|防水|防汗|速干|控油|保湿|"
     r"美白|抗皱|紧致|修护|滋养|清洁|去污|除菌|杀菌"
 )
+
+# ── Category-specific selling point word banks ──
+CATEGORY_WORD_BANKS: dict[str, re.Pattern] = {
+    "美妆": re.compile(
+        r"美白|抗皱|保湿|控油|修护|滋养|紧致|遮瑕|防晒|"
+        r"持妆|服帖|水润|清透|哑光|光泽|细腻|毛孔|焕亮"
+    ),
+    "食品": re.compile(
+        r"酥脆|浓郁|鲜嫩|爆汁|拉丝|Q弹|入口即化|香甜|"
+        r"松软|奶香|嚼劲|回甘|爽口|醇厚|细腻|丝滑|酥香"
+    ),
+    "数码": re.compile(
+        r"降噪|续航|快充|轻薄|高清|防水|防摔|秒开|"
+        r"流畅|不卡顿|散热|高刷|待机|识别|响应|同步"
+    ),
+    "家居": re.compile(
+        r"去污|除菌|收纳|折叠|静音|速干|省空间|"
+        r"免打孔|吸力|密封|防漏|易清洗|柔顺|除螨|净化"
+    ),
+    "服装": re.compile(
+        r"透气|亲肤|弹力|垂感|不起球|不褪色|百搭|"
+        r"显瘦|遮肉|挺括|柔软|保暖|速干|免烫|修身"
+    ),
+}
 
 # ── Urgency word bank ──
 URGENCY_WORDS = re.compile(r"限时|限量|最后|只剩|错过|不再|赶紧|立刻|马上|秒杀|抢购|倒计时")
@@ -116,6 +140,7 @@ class BurstMetricsCalculator:
         rhythm_points: list[dict[str, Any]] | None = None,
         packaging: dict[str, Any] | None = None,
         platform: str = "douyin",
+        product_category: str = "",
     ) -> None:
         self.shots = shots or []
         self.asr_text = asr_text or ""
@@ -125,6 +150,7 @@ class BurstMetricsCalculator:
         self.rhythm = rhythm_points or []
         self.packaging = packaging or {}
         self.platform = platform
+        self.product_category = product_category
         self.weights = PlatformWeights.for_platform(platform)
 
     # ── Public API ──
@@ -146,6 +172,7 @@ class BurstMetricsCalculator:
         results.extend(self._cta_visual())
         results.extend(self._cta_audio())
         results.extend(self._cta_subtitle())
+        results.extend(self._retention_risk())
         return results
 
     def _apply_weights(self, metric: MetricResult) -> int:
@@ -163,6 +190,9 @@ class BurstMetricsCalculator:
         weight = weight_map.get(metric.metric_id, 1.0)
         return min(100, int(metric.score * weight))
 
+    # ── Experimental metrics that can't be reliably measured ──
+    EXPERIMENTAL_METRICS = {"H-T2", "C-S2"}
+
     def dimension_reports(self) -> list[DimensionReport]:
         all_metrics = self.calculate_all()
         dims: dict[str, list[MetricResult]] = {}
@@ -176,13 +206,15 @@ class BurstMetricsCalculator:
             "density": "卖点密度 (Density)",
             "pacing": "节奏曲线 (Pacing)",
             "cta": "转化指令 (CTA)",
+            "retention": "留存风险 (Retention)",
         }
         for dim_key, metrics in dims.items():
-            # Platform-weighted average
-            weighted_scores = [self._apply_weights(m) for m in metrics]
-            avg = sum(weighted_scores) // max(len(weighted_scores), 1)
-            strengths = [m.name for m in metrics if self._apply_weights(m) >= 80]
-            weaknesses = [m.name for m in metrics if self._apply_weights(m) < 40]
+            # Platform-weighted average (exclude experimental metrics)
+            scorable = [m for m in metrics if m.metric_id not in self.EXPERIMENTAL_METRICS]
+            weighted_scores = [self._apply_weights(m) for m in scorable]
+            avg = sum(weighted_scores) // max(len(weighted_scores), 1) if weighted_scores else 50
+            strengths = [m.name for m in scorable if self._apply_weights(m) >= 80]
+            weaknesses = [m.name for m in scorable if self._apply_weights(m) < 40]
             reports.append(DimensionReport(
                 name=dim_names.get(dim_key, dim_key),
                 score=avg,
@@ -348,10 +380,9 @@ class BurstMetricsCalculator:
                            "字幕使用动态入场效果" if has_animation else "字幕静态出现",
                            "有动画" if has_animation else "无动画", has_animation)
 
-        # H-T2: 字号突变 — proxy: font_size change detection
-        score_ht2 = 50  # Default: can't reliably measure without actual rendering
-        ht2 = MetricResult("H-T2", "字号突变", "hook", "subtitle", score_ht2, 100,
-                           "基于视觉检测评估字号变化", "中等", False)
+        # H-T2: 字号突变 — EXPERIMENTAL: requires actual rendering, not measurable from analysis data
+        ht2 = MetricResult("H-T2", "字号突变[实验]", "hook", "subtitle", 0, 100,
+                           "需要实际渲染才能测量，分析阶段不适用", "N/A", False)
 
         # H-T3: 颜色冲突
         has_highlight = any(
@@ -436,8 +467,10 @@ class BurstMetricsCalculator:
             all_ocr.extend(f.get("ocr", []))
         ocr_text = " ".join(all_ocr)
 
-        # T-S1: 功效词标注
-        efficacy_count = len(SELLING_POINT_WORDS.findall(ocr_text)) if ocr_text else 0
+        # T-S1: 功效词标注 (use category-specific bank)
+        cat_bank = CATEGORY_WORD_BANKS.get(self.product_category)
+        sp_words = cat_bank if cat_bank else SELLING_POINT_WORDS
+        efficacy_count = len(sp_words.findall(ocr_text)) if ocr_text else 0
         score_ts1 = min(100, efficacy_count * 30)
         ts1 = MetricResult("T-S1", "功效词标注", "trust", "subtitle", score_ts1, 100,
                            f"OCR检测到{efficacy_count}个功效词", f"{efficacy_count}个", efficacy_count >= 3)
@@ -477,12 +510,15 @@ class BurstMetricsCalculator:
         return [dv1, dv2]
 
     def _density_audio(self) -> list[MetricResult]:
-        # D-A1: 卖点词频
-        sp_count = len(SELLING_POINT_WORDS.findall(self.asr_text))
+        # D-A1: 卖点词频 (use category-specific bank when available)
+        cat_bank = CATEGORY_WORD_BANKS.get(self.product_category)
+        sp_words = cat_bank if cat_bank else SELLING_POINT_WORDS
+        sp_count = len(sp_words.findall(self.asr_text))
         sp_rate = sp_count / max(self.duration, 1.0)
         score_da1 = min(100, int(sp_rate * 250))
+        cat_hint = f"({self.product_category}品类词库)" if cat_bank else "(通用词库)"
         da1 = MetricResult("D-A1", "卖点词频", "density", "audio", score_da1, 100,
-                           f"平均每5秒{sp_rate*5:.1f}个卖点词", f"{sp_rate*5:.1f}个/5秒", sp_rate >= 0.2)
+                           f"平均每5秒{sp_rate*5:.1f}个卖点词{cat_hint}", f"{sp_rate*5:.1f}个/5秒", sp_rate >= 0.2)
 
         # D-A2: 利益点前置
         first_sp_idx = self.asr_text.find("改善") if "改善" in self.asr_text else (
@@ -593,13 +629,14 @@ class BurstMetricsCalculator:
         return [ps1]
 
     # ═══════════════════════════════════════════════════════════════
-    # Dimension 5: CTA (转化指令) — 结尾5秒
+    # Dimension 5: CTA (转化指令) — 最后20-30%时长 (industry best practice)
     # ═══════════════════════════════════════════════════════════════
 
     def _cta_visual(self) -> list[MetricResult]:
-        cta_start = max(0, self.duration - 5)
+        cta_start = max(0, self.duration * 0.7)  # Last 30% of video
+        total_frames = max(len(self.vision_frames), 1)
         cta_frames = [f for f in self.vision_frames
-                     if f.get("index", 0) >= cta_start / (self.duration / max(len(self.vision_frames), 1))]
+                     if f.get("index", 0) >= cta_start / (self.duration / total_frames)]
 
         # C-V1: 价格/二维码出现
         has_price_visual = any(
@@ -650,12 +687,81 @@ class BurstMetricsCalculator:
                            "检测到原价vs现价对比" if has_anchor else "未检测到价格锚定",
                            "有锚定" if has_anchor else "无锚定", has_anchor)
 
-        # C-S2: 字号放大
-        score_cs2 = 45  # Requires actual rendering to measure
-        cs2 = MetricResult("C-S2", "CTA字号放大", "cta", "subtitle", score_cs2, 100,
-                           "基于视觉检测评估CTA字号", "中等", False)
+        # C-S2: 字号放大 — EXPERIMENTAL: requires actual rendering, not measurable from analysis data
+        cs2 = MetricResult("C-S2", "字号放大[实验]", "cta", "subtitle", 0, 100,
+                           "需要实际渲染才能测量，分析阶段不适用", "N/A", False)
 
         return [cs1, cs2]
+
+    # ═══════════════════════════════════════════════════════════════
+    # Dimension 6: Retention (留存风险) — inferred from structure
+    # ═══════════════════════════════════════════════════════════════
+
+    def _retention_risk(self) -> list[MetricResult]:
+        """Infer retention risk points from structure patterns.
+        These are structural red flags that industry data shows cause viewer drop-off.
+        """
+        results: list[MetricResult] = []
+
+        # R-1: 连续同类型风险 (≥3 consecutive same-type segments → drop risk)
+        types = [s.get("type", "") for s in self.shots]
+        max_consecutive = 1
+        current_consecutive = 1
+        for i in range(1, len(types)):
+            if types[i] == types[i-1]:
+                current_consecutive += 1
+                max_consecutive = max(max_consecutive, current_consecutive)
+            else:
+                current_consecutive = 1
+        score_r1 = max(0, 100 - (max_consecutive - 1) * 25)
+        r1 = MetricResult("R-1", "连续同类型风险", "retention", "structure",
+                          score_r1, 100,
+                          f"最多连续{max_consecutive}段同类型" + (" 高风险" if max_consecutive >= 3 else ""),
+                          f"{max_consecutive}段", max_consecutive < 3)
+
+        # R-2: Hook段存在性 (no hook → extreme drop risk)
+        has_hook = any(s.get("type") == "hook" for s in self.shots)
+        score_r2 = 100 if has_hook else 10
+        r2 = MetricResult("R-2", "Hook段存在性", "retention", "structure",
+                          score_r2, 100,
+                          "视频包含Hook开头段" if has_hook else "⚠️ 缺少Hook段——前3秒无注意力锚点",
+                          "有" if has_hook else "无", has_hook)
+
+        # R-3: CTA存在性 (no CTA → missed conversion)
+        has_cta = any(s.get("type") == "cta" for s in self.shots)
+        score_r3 = 100 if has_cta else 15
+        r3 = MetricResult("R-3", "CTA存在性", "retention", "structure",
+                          score_r3, 100,
+                          "视频包含CTA转化段" if has_cta else "⚠️ 缺少CTA段——无转化引导",
+                          "有" if has_cta else "无", has_cta)
+
+        # R-4: 产品段时长风险 (product segment > 10s → mid-drop risk)
+        product_segs = [s for s in self.shots if s.get("type") == "product"]
+        if product_segs:
+            max_prod_dur = max(float(s.get("duration_s", s.get("duration", 0))) for s in product_segs)
+            score_r4 = max(0, 100 - int(max(max_prod_dur - 8, 0) * 10))
+            r4 = MetricResult("R-4", "产品段时长风险", "retention", "structure",
+                              score_r4, 100,
+                              f"最长产品段{max_prod_dur:.1f}s" + (" 高风险" if max_prod_dur > 10 else ""),
+                              f"{max_prod_dur:.1f}s", max_prod_dur <= 10)
+        else:
+            r4 = MetricResult("R-4", "产品段时长风险", "retention", "structure",
+                              30, 100, "缺少产品展示段", "N/A", False)
+
+        # R-5: 结尾段类型 (final segment is CTA → optimal)
+        if types:
+            final_type = types[-1]
+            score_r5 = 95 if final_type == "cta" else (70 if final_type == "proof" else 40)
+            r5 = MetricResult("R-5", "结尾段类型", "retention", "structure",
+                              score_r5, 100,
+                              f"最后一段为{final_type}" + (" 最佳" if final_type == "cta" else ""),
+                              final_type, final_type == "cta")
+        else:
+            r5 = MetricResult("R-5", "结尾段类型", "retention", "structure",
+                              20, 100, "无分镜数据", "N/A", False)
+
+        results.extend([r1, r2, r3, r4, r5])
+        return results
 
     # ── Burst template extraction ──
 

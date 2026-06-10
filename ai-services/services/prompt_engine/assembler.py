@@ -13,7 +13,6 @@ from .vocabulary import (
     EMOTION_CAMERA_MAP,
     resolve_product_vocab,
     resolve_segment_action,
-    resolve_style_tone,
 )
 from .negative_prompts import select_negatives
 
@@ -36,13 +35,14 @@ class PromptResult:
     camera_platform_vocab: str   # e.g. "Cinematic slow push-in tracking shot"
     # Layer 4: Style
     lighting: str                # e.g. "Soft key light from 45° left"
-    style_tone: str              # e.g. "volumetric studio lighting, 8k"
     emotion_tone: str            # e.g. "warm and inviting"
     # Layer 5: Constraints
     negative_prompt: str         # assembled negative prompt string
 
     # Fields with defaults
     subject_textures: list[str] = field(default_factory=list)
+    clean_visual: str = ""         # Cleaned LLM visual description
+    segment_script: str = ""       # The segment's spoken script
     duration: float = 5.0
     aspect_ratio: str = "9:16"
     resolution: str = "720p"
@@ -66,6 +66,7 @@ class PromptAssembler:
         product_name: str = "",
         product_type: str = "其他",
         platform: str = "seedance",
+        product_visual: dict | None = None,
     ) -> PromptResult:
         """Build a complete PromptResult from segment and product metadata.
 
@@ -92,8 +93,14 @@ class PromptAssembler:
         clean_visual = re.sub(r'\s+', ' ', clean_visual).strip()
 
         # ── Layer 1: Subject ──
+        # Always use English vocabulary. Product image Vision analysis enriches
+        # matching but never injects Chinese text into the English prompt.
         vocab = resolve_product_vocab(product_type, clean_visual)
         subject_textures = list(vocab.get("textures", ["clean", "professional"]))
+        # Enrich lighting with vision colors if available
+        vision_colors = product_visual.get("colors", []) if product_visual else []
+        if vision_colors:
+            vocab["lighting"] = f"product photography, dominant colors: {', '.join(vision_colors[:3])}"
         subject_text = self._build_subject_text(product_name, clean_visual, subject_textures, product_type)
 
         # ── Layer 2: Action ──
@@ -107,7 +114,6 @@ class PromptAssembler:
 
         # ── Layer 4: Style ──
         lighting = vocab.get("lighting", "studio lighting, clean background")
-        style_tone = resolve_style_tone(emotion, product_type)
         emotion_tone = emotion_cam.get("style_tone", "")
 
         # ── Layer 5: Constraints ──
@@ -124,12 +130,13 @@ class PromptAssembler:
             platform=platform,
             subject_text=subject_text,
             subject_textures=subject_textures,
+            clean_visual=clean_visual,
+            segment_script=script,
             action_text=action_text,
             camera_motion=camera_motion,
             shot_size=shot_size,
             camera_platform_vocab=camera_vocab,
             lighting=lighting,
-            style_tone=style_tone,
             emotion_tone=emotion_tone,
             negative_prompt=negative,
             duration=duration,

@@ -11,9 +11,9 @@ function _showErrorToast(message: string) {
   toast.id = '__structforge_error_toast';
   toast.style.cssText =
     'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);' +
-    'background:#3D1414;color:#FCA5A5;padding:12px 24px;border-radius:10px;' +
+    'background:#FDF4F4;color:#D45A5A;padding:12px 24px;border-radius:12px;' +
     'z-index:99999;font-family:system-ui,sans-serif;font-size:14px;' +
-    'border:1px solid rgba(220,38,38,0.3);box-shadow:0 4px 24px rgba(0,0,0,0.5);' +
+    'border:1px solid #FCE8E8;box-shadow:0 4px 16px rgba(0,0,0,0.06);' +
     'backdrop-filter:blur(8px);max-width:90vw;text-align:center;';
   toast.textContent = message;
   document.body.appendChild(toast);

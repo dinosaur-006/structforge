@@ -47,7 +47,6 @@ class Settings(BaseSettings):
     jimeng_image_api_key: str | None = None
     doubao_image_model: str = "doubao-seedream-5-0-260128"
     doubao_image_api_key: str | None = None
-    doubao_video_model: str = "doubao-seedance-1-5-pro-251215"
     remotion_service_url: str | None = None
     llm_max_attempts: int = Field(default=3, ge=1, le=10)
     seed_demo: bool = False
@@ -64,6 +63,14 @@ class Settings(BaseSettings):
     llm_timeout_seconds: int = Field(default=60, ge=10, le=300)  # Centralized LLM timeout
     llm_light_timeout_seconds: int = Field(default=30, ge=10, le=120)  # For lightweight calls
     use_new_pipeline: bool = True  # Use new VideoRenderPipeline (set False to revert)
+
+    # RunningHub / ComfyUI
+    runninghub_api_key: str | None = None  # rh-key-xxx
+    runninghub_url: str = "https://www.runninghub.ai"  # 中国站用 https://www.runninghub.cn
+    comfyui_url: str | None = None  # http://127.0.0.1:8188 (自建 ComfyUI，可选)
+    comfyui_image_workflow: str = "image_flux"  # 默认文生图工作流
+    comfyui_video_workflow: str = "video_wan2.2"  # 默认图生视频工作流
+    comfyui_video_enabled: bool = False  # 启用 WAN 2.2 图生视频 (需 RunningHub Key)
 
 
 def get_settings() -> Settings:

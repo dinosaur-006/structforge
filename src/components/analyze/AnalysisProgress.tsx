@@ -23,10 +23,10 @@ export function AnalysisProgress({ progress, stage }: AnalysisProgressProps) {
   }, []);
 
   return (
-    <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
+    <div className="rounded-xl border border-border/60 bg-white p-5 shadow-sm">
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="grid h-11 w-11 place-items-center rounded-lg border border-border bg-sidebar text-primary">
+          <div className="grid h-11 w-11 place-items-center rounded-xl border border-border bg-sidebar text-primary">
             <Icon className="h-5 w-5 animate-pulse" />
           </div>
           <div>

@@ -61,7 +61,7 @@ export function NLEditInput({ onCommand, loading }: NLEditInputProps) {
       {!open ? (
         <button
           type="button"
-          className="flex items-center gap-2 rounded-lg border border-dashed border-border px-4 py-2 text-sm font-medium text-text-secondary transition-colors hover:border-primary/50 hover:text-primary"
+          className="flex items-center gap-2 rounded-xl border border-dashed border-border px-4 py-2 text-sm font-medium text-text-secondary transition-colors hover:border-primary/50 hover:text-primary"
           onClick={() => setOpen(true)}
         >
           <Wand2 className="h-4 w-4" />
@@ -71,7 +71,7 @@ export function NLEditInput({ onCommand, loading }: NLEditInputProps) {
           </kbd>
         </button>
       ) : (
-        <div className="flex w-full items-center gap-2 rounded-lg border-2 border-primary bg-card px-4 py-2 shadow-lg">
+        <div className="flex w-full items-center gap-2 rounded-xl border-2 border-primary bg-card px-4 py-2 shadow-lg">
           <Sparkles className="h-4 w-4 flex-none text-primary" />
           <input
             ref={inputRef}

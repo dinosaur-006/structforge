@@ -42,7 +42,7 @@ export function VideoUploader({ file, onFile, onFiles, onStart, disabled, fileCo
       {error ? <ErrorAlert title={'\u4e0a\u4f20\u5931\u8d25'} description={error} /> : null}
       <div
         className={cn(
-          'rounded-lg border border-dashed bg-card p-6 shadow-sm transition-colors duration-200 md:p-8',
+          'rounded-xl border border-dashed bg-card p-6 shadow-sm transition-colors duration-200 md:p-8',
           dragging ? 'border-primary bg-sidebar' : 'border-border hover:border-primary/50',
         )}
         onDragOver={(event) => {
@@ -66,7 +66,7 @@ export function VideoUploader({ file, onFile, onFiles, onStart, disabled, fileCo
         />
         {!file ? (
           <div className="flex flex-col items-center justify-center text-center">
-            <div className="mb-5 grid h-20 w-20 place-items-center rounded-lg border border-border bg-sidebar text-primary">
+            <div className="mb-5 grid h-20 w-20 place-items-center rounded-xl border border-border bg-sidebar text-primary">
               <Upload className="h-9 w-9" />
             </div>
             <h2 className="text-xl font-semibold">{'\u62d6\u62fd\u89c6\u9891\u5230\u6b64\u5904\uff0c\u6216\u70b9\u51fb\u4e0a\u4f20'}</h2>
@@ -78,7 +78,7 @@ export function VideoUploader({ file, onFile, onFiles, onStart, disabled, fileCo
           </div>
         ) : (
           <div className="grid gap-5 md:grid-cols-[180px,1fr]">
-            <div className="grid aspect-[9/16] max-h-64 place-items-center rounded-lg border border-border bg-sidebar">
+            <div className="grid aspect-[9/16] max-h-64 place-items-center rounded-xl border border-border bg-sidebar">
               <Video className="h-12 w-12 text-primary" />
             </div>
             <div className="flex flex-col justify-center">

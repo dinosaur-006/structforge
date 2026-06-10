@@ -72,7 +72,7 @@ export default function AnalyzePage() {
 
   if (isAnalyzing && !analysisResult) {
     return (
-      <section className="mx-auto max-w-[1240px] space-y-6">
+      <section className="mx-auto max-w-[1240px] px-5 sm:px-6 lg:px-8 py-8 sm:py-12 lg:py-14 space-y-4">
         <WorkflowSteps current="analyze" projectId={activeProjectId ?? projectId} />
         <SectionHeader title={copy.analyzeTitle} description={copy.analyzeSubtitle} />
         {isAnalyzing ? <AnalysisProgress progress={progress} stage={stage} /> : null}
@@ -81,7 +81,7 @@ export default function AnalyzePage() {
   }
 
   return (
-    <section className="mx-auto max-w-[1240px] space-y-6">
+    <section className="mx-auto max-w-[1240px] px-5 sm:px-6 lg:px-8 py-8 sm:py-12 lg:py-14 space-y-4">
       <WorkflowSteps current="analyze" projectId={activeProjectId ?? projectId} />
       <SectionHeader
         title={copy.analyzeTitle}
@@ -108,9 +108,9 @@ export default function AnalyzePage() {
         <SampleComparison samples={analysisSamples} onSelect={(jobId) => void selectReferenceSample(activeProjectId ?? projectId ?? '', jobId)} />
       ) : null}
       {analysisResult ? (
-        <div className="space-y-5">
+        <div className="space-y-4">
           {/* ── Analysis complete: prompt to continue ── */}
-          <div className="flex items-center justify-between rounded-lg border border-success/30 bg-success/5 px-5 py-4">
+          <div className="flex items-center justify-between rounded-xl border border-success/30 bg-success/5 px-5 py-4">
             <div>
               <p className="font-semibold text-success">AI 分析完成</p>
               <p className="text-sm text-text-secondary">结构拆解、脚本提取、健康度评估已完成，点击继续进入 AI 自动优化</p>

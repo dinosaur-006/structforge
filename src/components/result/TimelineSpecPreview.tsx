@@ -41,14 +41,14 @@ export function TimelineSpecPreview({ spec }: Props) {
 
   if (!spec) {
     return (
-      <div className="flex min-h-[200px] items-center justify-center rounded-lg border border-border bg-card text-sm text-text-muted">
+      <div className="flex min-h-[200px] items-center justify-center rounded-xl border border-border bg-card text-sm text-text-muted">
         暂无结构化预览数据 — 请先生成脚本
       </div>
     );
   }
 
   return (
-    <div className="rounded-lg border border-border bg-card shadow-sm overflow-hidden">
+    <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-2 border-b border-border px-4 py-2">
         <Layers className="h-4 w-4 text-primary" />

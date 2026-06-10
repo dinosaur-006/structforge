@@ -20,7 +20,7 @@ export function Toast() {
           <div
             key={toast.id}
             role="alert"
-            className="rounded-lg border border-border bg-card/95 p-4 text-left shadow-md backdrop-blur transition-colors hover:border-primary/40"
+            className="rounded-xl border border-border bg-card/95 p-4 text-left shadow-md backdrop-blur transition-colors hover:border-primary/40"
           >
             <button
               type="button"

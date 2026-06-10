@@ -91,26 +91,15 @@ class BurstAuditor:
         # Step 4: Generate auto-fix patches for critically low metrics
         auto_fix_patches = calc.generate_auto_fix_patches()
 
-        # Step 5: LLM soft analysis (if available)
-        llm_insights: dict[str, Any] = {}
-        if self._llm_available:
-            try:
-                llm_insights = self._llm_analyze(calc, all_metrics)
-            except Exception as exc:
-                log.warning("LLM audit analysis failed: %s", exc)
-                llm_insights = {"error": str(exc), "top_strength": "N/A", "top_weakness": "N/A"}
-
-        # Step 6: Generate suggestions (merge auto-fix with LLM)
-        suggestions = llm_insights.get("suggestions", [])
-        if not suggestions:
-            suggestions = self._rule_suggestions(dimensions)
-        # Append auto-fix suggestions
+        # Step 5: Rule-based suggestions (no LLM — instant)
+        suggestions = self._rule_suggestions(dimensions)
         for fix in auto_fix_patches[:3]:
             suggestions.append({
                 "target": fix["metric_name"],
-                "action": fix["action"] + f" (自动修复)",
+                "action": fix["action"],
                 "expected_effect": f"将 {fix['metric_id']} 从 {fix['current_score']} 分提升至达标线",
             })
+        llm_insights: dict[str, Any] = {"top_strength": "", "top_weakness": "", "suggestions": []}
 
         # Step 7: Extract burst template
         burst_template = calc.extract_burst_template()

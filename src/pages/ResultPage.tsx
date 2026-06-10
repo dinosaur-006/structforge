@@ -1,17 +1,15 @@
-import { Columns2, Copy, Download, FileText, GitBranch, Grid3X3, History, Play, ShieldAlert, X } from 'lucide-react';
+import { Columns2, Download, FileText, GitBranch, History, ShieldAlert, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AIReview } from '../components/result/AIReview';
-import { CompareRadar } from '../components/result/CompareRadar';
 import { ExportDialog } from '../components/result/ExportDialog';
 import { PayloadPreviewDrawer } from '../components/result/PayloadPreviewDrawer';
 import { ResultTimeline } from '../components/result/ResultTimeline';
-import { TimelineSpecPreview } from '../components/result/TimelineSpecPreview';
+import { ReviewPanel } from '../components/result/ReviewPanel';
 import { VersionTabs } from '../components/result/VersionTabs';
 import { VideoPlayer } from '../components/result/VideoPlayer';
 import { Button } from '../components/ui/Button';
 import { ErrorAlert } from '../components/ui/ErrorAlert';
-import { MetricRow } from '../components/ui/MetricRow';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { WorkflowSteps } from '../components/layout/WorkflowSteps';
 import { copy } from '../shared/copy';
@@ -49,6 +47,7 @@ export default function ResultPage() {
   const [compareMode, setCompareMode] = useState(false);
   const [projectsChecked, setProjectsChecked] = useState(false);
   const [waveform, setWaveform] = useState<WaveformData | null>(null);
+  const [segmentModes, setSegmentModes] = useState<Record<string, 'image' | 'video'>>({});
   const [playbackTime, setPlaybackTime] = useState(0);
   const fetchProjects = useAppStore((state) => state.fetchProjects);
   const loadFinalScript = useAppStore((state) => state.loadFinalScript);
@@ -62,6 +61,8 @@ export default function ResultPage() {
   const setVersion = useAppStore((state) => state.setVersion);
   const isExporting = useAppStore((state) => state.isExporting);
   const renderProgress = useAppStore((state) => state.renderProgress);
+  const renderStage = useAppStore((state) => state.renderStage);
+  const renderWarnings = useAppStore((state) => state.renderWarnings);
   const outputUrl = useAppStore((state) => state.outputUrl);
   const startRender = useAppStore((state) => state.startRender);
   const currentVersion = useMemo(() => versions.find((version) => version.id === currentVersionId) ?? versions[0], [currentVersionId, versions]);
@@ -84,9 +85,41 @@ export default function ResultPage() {
     return false;
   }, [currentVersion?.timeline, currentScript?.segments]);
 
+  // Auto-generate timeline spec from script segments when LLM data is missing
+  const timelineSpec = useMemo(() => {
+    const llmSpec = (currentScript?.metadata as Record<string, unknown>)?.timelineSpec;
+    if (llmSpec) return llmSpec;
+    if (!currentScript) return null;
+    const fps = 30;
+    const totalFrames = Math.round(currentScript.total_duration * fps);
+    return {
+      composition: { fps, width: 1080, height: 1920, totalFrames, durationSeconds: currentScript.total_duration },
+      tracks: [
+        { id: 'video-track', type: 'video', label: '视频', clips: currentScript.segments.map((seg, i) => ({
+          id: `clip-${i}`, startFrame: Math.round(seg.start * fps), durationInFrames: Math.round(seg.duration * fps),
+          component: seg.type === 'hook' ? 'TitleCard' : seg.type === 'cta' ? 'CTACard' : seg.type === 'product' ? 'ProductHero' : 'OverlayText',
+          props: { label: seg.type, script: seg.script?.slice(0, 30) || '' },
+        }))},
+        { id: 'subtitle-track', type: 'subtitle', label: '字幕', clips: currentScript.segments.map((seg, i) => ({
+          id: `s-${i}`, startFrame: Math.round(seg.start * fps), durationInFrames: Math.round(seg.duration * fps),
+          component: 'OverlayText', props: { text: seg.script?.slice(0, 40) || '' },
+        }))},
+      ],
+    };
+  }, [currentScript]);
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
+      // Restore render error from previous session if page was refreshed
+      try {
+        const stored = sessionStorage.getItem('lastRenderError');
+        if (stored && !useAppStore.getState().renderError) {
+          const parsed = JSON.parse(stored);
+          useAppStore.setState({ renderError: parsed.error, renderStatus: 'failed' as const });
+        }
+      } catch {}
+
       if (!useAppStore.getState().projects.length) await fetchProjects();
       await fetchResultVersions(projectId);
       if (useAppStore.getState().versions.some((version) => version.id !== 'original')) {
@@ -100,15 +133,15 @@ export default function ResultPage() {
     };
   }, [fetchProjects, fetchResultVersions, loadFinalScript, projectId]);
 
-  // ── Render on demand (user clicks "生成视频" after reviewing) ──
-  const [reviewMode, setReviewMode] = useState(true);
+  // ── Render on demand ──
   const triggerRender = useCallback(() => {
     if (!projectId || !currentVersion || currentVersion.id === 'original') return;
     const version = renderVersionMap[currentVersion.id] ?? 'original';
     const scriptVersion = currentVersion.id === 'original' ? undefined : currentVersion.id as FinalScriptStyle;
-    setReviewMode(false);
-    void startRender(projectId, version, '1080p', scriptVersion);
-  }, [projectId, currentVersion?.id, startRender]);
+    const modes: Record<string, string> = {};
+    currentScript?.segments.forEach(s => { modes[s.id] = segmentModes[s.id] || 'image'; });
+    void startRender(projectId, version, '1080p', scriptVersion, modes);
+  }, [projectId, currentVersion?.id, currentScript?.segments, segmentModes, startRender]);
 
   // Fetch waveform data
   useEffect(() => {
@@ -117,6 +150,26 @@ export default function ResultPage() {
       if (data?.data?.length) setWaveform(data);
     }).catch(() => {});
   }, [projectId]);
+
+  // Auto-close ExportDialog when render completes and video is ready
+  useEffect(() => {
+    if (outputUrl && !isExporting && exportOpen) {
+      setExportOpen(false);
+    }
+  }, [outputUrl, isExporting, exportOpen]);
+
+  // Fallback: if render completed but no outputUrl in store, fetch it directly
+  const renderJobId = useAppStore((s) => s.renderJobId);
+  const renderStatus = useAppStore((s) => s.renderStatus);
+  useEffect(() => {
+    if (renderStatus === 'completed' && !outputUrl && renderJobId) {
+      api.getRenderJob(renderJobId).then((s) => {
+        if (s.output_url) {
+          useAppStore.setState({ outputUrl: s.output_url });
+        }
+      }).catch(() => {});
+    }
+  }, [renderStatus, outputUrl, renderJobId]);
 
   // Fetch capabilities and blueprint payloads on mount
   useEffect(() => {
@@ -174,7 +227,7 @@ export default function ResultPage() {
   const structuralDecision = getStructuralDecision(currentScript);
 
   return (
-    <section className="mx-auto max-w-[1240px] space-y-6">
+    <section className="mx-auto max-w-[1240px] px-5 sm:px-6 lg:px-8 py-8 sm:py-12 lg:py-14 space-y-4">
       <WorkflowSteps current="result" projectId={projectId} />
       <SectionHeader
         title={copy.resultTitle}
@@ -192,7 +245,7 @@ export default function ResultPage() {
                   lines.push(`# \u9879\u76ee: ${project.name}`);
                   lines.push(`# \u751f\u6210\u65f6\u95f4: ${new Date().toISOString()}`);
                   lines.push(`# \u5171 ${count} \u4e2a\u5206\u955c\u9700\u8981 AI \u751f\u6210`);
-                  lines.push('# \u517c\u5bb9\u5e73\u53f0: Seedance 2.0 / Runway Gen-4 / Kling');
+                  lines.push('# \u517c\u5bb9\u5e73\u53f0: RunningHub ComfyUI Flux');
                   lines.push('');
                   drafts.forEach((seg, i) => {
                     const label = seg.type?.toUpperCase() ?? `SEG-${i}`;
@@ -200,15 +253,11 @@ export default function ResultPage() {
                     lines.push(`\u5b57\u5e55: ${seg.script || '(\u65e0)'}`);
                     lines.push(`\u8fd0\u955c: ${(seg as Record<string, unknown>).camera || '\u9759\u6001'} | \u7279\u6548: ${(seg as Record<string, unknown>).visual_fx || '\u65e0'}`);
                     lines.push('');
-                    lines.push('[Seedance]');
+                    lines.push('[Flux]');
                     lines.push(`\u7ad6\u5c4f\u77ed\u89c6\u9891\u753b\u9762\uff0c9:16\u6784\u56fe\uff0c\u7535\u5546\u5e26\u8d27\u98ce\u683c\u3002${seg.visual || seg.script || ''}`);
                     lines.push('');
-                    lines.push('[Runway]');
-                    lines.push(`Close-up of product. ${seg.visual || seg.script || ''}. Soft studio lighting, commercial aesthetic.`);
-                    lines.push('');
-                    lines.push('[Kling]');
-                    lines.push(`\u4ea7\u54c1\u5e7f\u544a\u753b\u9762\u3002${seg.visual || seg.script || ''}\u3002\u955c\u5934\u7f13\u7f13\u63a8\u8fd1\uff0c\u67d4\u548c\u5149\u7ebf\u3002`);
-                    lines.push('');
+                    
+                    
                     lines.push('---');
                     lines.push('');
                   });
@@ -219,7 +268,7 @@ export default function ResultPage() {
                   a.click(); URL.revokeObjectURL(url);
                 };
                 return (
-                  <Button variant="primary" className="bg-[#FFB300] hover:bg-[#FFC107] text-[#0A0A10] border-0 font-bold text-sm" onClick={doExport}>
+                  <Button variant="primary" className="bg-[#C8843C] hover:bg-[#B07530] text-[#1C1C1E] border-0 font-bold text-sm" onClick={doExport}>
                     <FileText className="h-4 w-4" />
                     Export AI Prompts ({count} segments)
                   </Button>
@@ -231,13 +280,13 @@ export default function ResultPage() {
 
       <div className="flex items-center gap-3">
         <div className="flex-1">
-          <VersionTabs versions={versions} currentId={currentVersion.id} onChange={setVersion} />
+          <VersionTabs versions={(() => { const gen = versions.filter(v => v.id !== 'original'); return gen.length > 0 ? gen : versions; })()} currentId={currentVersion.id} onChange={setVersion} />
         </div>
         {versions.length > 1 ? (
           <>
             <button
               type="button"
-              className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${compareMode ? 'border-primary/40 bg-primary-muted text-primary' : 'border-border-visible text-text-secondary hover:border-primary/40 hover:text-primary'}`}
+              className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-medium transition-colors ${compareMode ? 'border-primary/40 bg-primary-muted text-primary' : 'border-border-visible text-text-secondary hover:border-primary/40 hover:text-primary'}`}
               onClick={() => setCompareMode(!compareMode)}
             >
               <Columns2 className="h-3.5 w-3.5" />
@@ -245,7 +294,7 @@ export default function ResultPage() {
             </button>
             <button
               type="button"
-              className="flex items-center gap-1.5 rounded-lg border border-border-visible px-3 py-2 text-xs font-medium text-text-secondary transition-colors hover:border-primary/40 hover:text-primary"
+              className="flex items-center gap-1.5 rounded-xl border border-border-visible px-3 py-2 text-xs font-medium text-text-secondary transition-colors hover:border-primary/40 hover:text-primary"
               onClick={() => setHistoryOpen(true)}
             >
               <History className="h-3.5 w-3.5" />
@@ -259,8 +308,8 @@ export default function ResultPage() {
       {historyOpen ? (
         <div className="fixed inset-0 z-50 flex justify-end">
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setHistoryOpen(false)} />
-          <div className="relative z-10 flex h-full w-80 flex-col border-l border-border bg-card shadow-raised animate-in">
-            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+          <div className="relative z-10 flex h-full w-80 flex-col border-l border-border/60 bg-white shadow-raised animate-in">
+            <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
               <h3 className="font-semibold text-sm">版本历史</h3>
               <button onClick={() => setHistoryOpen(false)} className="rounded p-1 text-text-muted hover:text-text-primary">
                 <X className="h-4 w-4" />
@@ -271,19 +320,11 @@ export default function ResultPage() {
                 <button
                   key={v.id}
                   type="button"
-                  className={`w-full rounded-lg border p-3 text-left transition-colors ${v.id === currentVersion.id ? 'border-primary/30 bg-primary-muted' : 'border-border-visible hover:border-primary/20'}`}
+                  className={`w-full rounded-xl border p-3 text-left transition-colors ${v.id === currentVersion.id ? 'border-primary/30 bg-primary-muted' : 'border-border-visible hover:border-primary/20'}`}
                   onClick={() => { setVersion(v.id); setHistoryOpen(false); }}
                 >
                   <div className="flex items-center justify-between">
                     <span className="font-medium text-sm">{v.name}</span>
-                    <span className={`font-mono text-xs font-bold ${v.score >= 80 ? 'text-success' : v.score >= 65 ? 'text-warning' : 'text-text-muted'}`}>{v.score}</span>
-                  </div>
-                  <div className="mt-1.5 flex flex-wrap gap-1 text-xs text-text-muted">
-                    {v.metrics.scoreDelta !== 0 ? (
-                      <span className={v.metrics.scoreDelta > 0 ? 'text-success' : 'text-error'}>
-                        {v.metrics.scoreDelta > 0 ? '+' : ''}{v.metrics.scoreDelta} vs 基线
-                      </span>
-                    ) : null}
                   </div>
                 </button>
               ))}
@@ -292,32 +333,39 @@ export default function ResultPage() {
         </div>
       ) : null}
 
-      {/* Optimization score summary */}
-      {currentVersion.id !== 'original' && currentVersion.metrics.scoreDelta !== 0 ? (
-        <div className={`rounded-lg border px-4 py-3 shadow-sm ${currentVersion.metrics.scoreDelta > 0 ? 'border-success/40 bg-success/5' : 'border-warning/40 bg-warning/5'}`}>
-          <p className="text-sm font-semibold">
-            {currentVersion.metrics.scoreDelta > 0
-              ? `AI \u4f18\u5316\u63d0\u5347 +${currentVersion.metrics.scoreDelta} \u5206`
-              : `\u7efc\u5408\u8bc4\u5206 ${currentVersion.metrics.scoreDelta} \u5206`}
-          </p>
-          <p className="mt-1 text-sm text-text-secondary">
-            {currentVersion.metrics.scoreDelta > 0
-              ? '\u4f18\u5316\u540e\u7684\u811a\u672c\u5728\u5f00\u5934\u5438\u5f15\u529b\u3001\u5356\u70b9\u8bc1\u660e\u529b\u548c\u8f6c\u5316\u53f7\u53ec\u529b\u65b9\u9762\u6709\u660e\u663e\u63d0\u5347'
-              : '\u4f18\u5316\u540e\u7684\u811a\u672c\u8c03\u6574\u4e86\u7ed3\u6784\u548c\u6587\u6848\uff0c\u8bc4\u5206\u4e0e\u539f\u59cb\u89c6\u9891\u6301\u5e73\u6216\u7565\u6709\u5dee\u5f02'}
-          </p>
+      {/* Structural comparison summary */}
+      {currentVersion.id !== 'original' && currentScript ? (
+        <div className="flex items-center gap-2 text-xs text-text-muted">
+          <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+          <span>{currentScript.segments.length} \u4e2a\u5206\u955c \u00b7 {currentScript.total_duration.toFixed(1)}s \u00b7 {scriptVersionLabel[currentScript.version] ?? currentScript.version}</span>
         </div>
       ) : null}
 
       {/* AI qualitative review */}
       <AIReview data={currentScript?.metadata?.ai_review} />
 
-      <div className="rounded-lg border border-border bg-card px-4 py-3 text-sm text-text-secondary shadow-sm">
-        <span className="rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent mr-2">\u89c4\u5219\u91cf\u5316\u5f97\u5206</span>
-        {evaluationLabel}{'\uff1a'}{currentScript ? '\u5df2\u751f\u6210\u7248\u672c\u4e0e\u6837\u4f8b\u57fa\u7ebf\u4f7f\u7528\u540c\u4e00\u89c4\u5219\u8bc4\u5206\u3002' : '\u5c1a\u672a\u751f\u6210\u65b0\u811a\u672c\uff0c\u4ec5\u663e\u793a\u6837\u4f8b\u57fa\u7ebf\u3002'}
-        <span className="block mt-1 text-xs text-text-muted">\u57fa\u4e8e\u53ef\u89e3\u91ca\u7684\u7206\u6b3e\u7279\u5f81\u516c\u5f0f\u81ea\u52a8\u8ba1\u7b97\uff0c\u7528\u4e8e\u9a71\u52a8\u7d20\u6750\u5339\u914d\u4e0e\u7f3a\u53e3\u8865\u5168\u51b3\u7b56</span>
-      </div>
+      {/* Render quality (self-audit) */}
+      {(() => {
+        const meta = currentScript?.metadata as Record<string, any> | undefined;
+        const audit = meta?.self_audit;
+        if (!audit?.visual_generation) return null;
+        const vg = audit.visual_generation;
+        const ag = audit.audio_generation;
+        return (
+          <div className="rounded-xl border border-border/60 bg-white px-4 py-3 text-sm shadow-sm">
+            <span className="text-xs font-semibold text-text-primary">\u6e32\u67d3\u8d28\u91cf</span>
+            <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1">
+              <div className="flex justify-between"><span className="text-xs text-text-muted">\u753b\u9762\u751f\u6210</span><span className="text-xs font-medium text-text-primary">{vg.method}</span></div>
+              <div className="flex justify-between"><span className="text-xs text-text-muted">\u753b\u9762\u8d28\u91cf</span><span className="text-xs font-medium">{vg.quality}</span></div>
+              <div className="flex justify-between"><span className="text-xs text-text-muted">AI \u751f\u56fe</span><span className="text-xs font-medium text-text-primary">{vg.flux_segments}/{audit.segment_count} \u6bb5</span></div>
+              <div className="flex justify-between"><span className="text-xs text-text-muted">\u914d\u97f3</span><span className="text-xs font-medium text-text-primary">{ag?.method || '\u672a\u542f\u7528'}</span></div>
+            </div>
+          </div>
+        );
+      })()}
+
       {structuralDecision ? (
-        <div className={`rounded-lg border bg-card px-4 py-3 shadow-sm ${structuralDecision.renderBlocked ? 'border-warning/40' : 'border-border'}`}>
+        <div className={`rounded-xl border bg-white px-4 py-3 shadow-sm ${structuralDecision.renderBlocked ? 'border-warning/40' : 'border-border'}`}>
           <div className="flex items-start gap-3">
             {structuralDecision.renderBlocked ? <ShieldAlert className="mt-0.5 h-5 w-5 flex-none text-warning" /> : <GitBranch className="mt-0.5 h-5 w-5 flex-none text-primary" />}
             <div>
@@ -329,7 +377,7 @@ export default function ResultPage() {
       ) : null}
       {compareMode && original ? (
         <div className="grid gap-5 lg:grid-cols-2 animate-in">
-          <div className="space-y-4 rounded-lg border border-border-visible bg-card p-5">
+          <div className="space-y-4 rounded-xl border border-border-visible bg-white p-5">
             <h3 className="font-semibold text-sm text-text-muted">原始样例</h3>
             <div className="grid grid-cols-2 gap-3 text-sm">
               <Metric label="综合分" value={original.score} />
@@ -337,9 +385,9 @@ export default function ResultPage() {
               <Metric label="产品露出" value={original.metrics.productExposure.after} />
               <Metric label="CTA时长" value={original.metrics.ctaDuration.after} />
             </div>
-            <CompareRadar original={original.health} current={original.health} />
+            
           </div>
-          <div className="space-y-4 rounded-lg border border-primary/20 bg-primary-muted p-5">
+          <div className="space-y-4 rounded-xl border border-primary/20 bg-primary-muted p-5">
             <h3 className="font-semibold text-sm text-primary">{currentVersion.name}</h3>
             <div className="grid grid-cols-2 gap-3 text-sm">
               <Metric label="综合分" value={currentVersion.score} />
@@ -347,44 +395,42 @@ export default function ResultPage() {
               <Metric label="产品露出" value={currentVersion.metrics.productExposure.after} />
               <Metric label="CTA时长" value={currentVersion.metrics.ctaDuration.after} />
             </div>
-            <CompareRadar original={original.health} current={currentVersion.health} />
+            
           </div>
         </div>
       ) : (
       <>
         {/* ── Review section: shown before render starts ── */}
-        {reviewMode && currentScript && (
-          <ReviewPanel
-            segments={currentScript.segments}
-            projectName={project.name}
-            onGenerate={triggerRender}
-            isRendering={isExporting}
-          />
-        )}
+        {currentScript && (() => {
+          const meta = currentScript.metadata as Record<string, any> | undefined;
+          const promptList = meta?.prompts as Array<{segment_id: string; prompt: string}> | undefined;
+          const promptMap: Record<string, string> = {};
+          if (promptList) { promptList.forEach(p => { promptMap[p.segment_id] = p.prompt; }); }
+          return (
+            <ReviewPanel
+              segments={currentScript.segments}
+              projectName={project.name}
+              segmentModes={segmentModes}
+              segmentPrompts={promptMap}
+              onModeChange={(id, mode) => setSegmentModes(prev => ({ ...prev, [id]: mode }))}
+              onGenerate={triggerRender}
+              isRendering={isExporting}
+            />
+          );
+        })()}
 
-        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr),340px]">
+        <div className="grid gap-5">
           <VideoPlayer
             timeline={currentVersion.timeline}
             src={renderedVideoUrl}
             onTimeUpdate={setPlaybackTime}
             isRendering={isExporting}
             renderProgress={renderProgress}
+            renderWarnings={renderWarnings}
             hasDraftSegments={hasDraftSegments}
             onBlueprintClick={handleBlueprintClick}
           />
-          <aside className="rounded-lg border border-border bg-card p-5 shadow-sm">
-            <div className="flex items-center gap-2 mb-1">
-              <h2 className="font-semibold">{'\u7248\u672c\u6307\u6807'}</h2>
-              <span className="rounded-full bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">\u89c4\u5219\u91cf\u5316</span>
-            </div>
-            <div className="mt-3">
-              <MetricRow label={'\u7ed3\u6784\u5206'} before={`${original.score}`} after={`${currentVersion.score}`} delta={signedScore(currentVersion.metrics.scoreDelta)} positive={currentVersion.metrics.scoreDelta >= 0} />
-              <MetricRow label={'\u7d20\u6750\u8986\u76d6\u7387'} {...currentVersion.metrics.materialCoverage} />
-              <MetricRow label={'\u4ea7\u54c1\u9996\u6b21\u9732\u51fa'} {...currentVersion.metrics.productExposure} />
-              <MetricRow label={'\u7f3a\u53e3\u6570\u91cf'} {...currentVersion.metrics.gapCount} />
-              <MetricRow label={'CTA \u65f6\u957f'} {...currentVersion.metrics.ctaDuration} />
-            </div>
-          </aside>
+
         </div>
         <ResultTimeline
           segments={currentVersion.timeline}
@@ -393,14 +439,15 @@ export default function ResultPage() {
           onSeek={handleTimelineSeek}
           onTrim={handleTrim}
         />
-        <TimelineSpecPreview spec={(currentScript?.metadata as Record<string, unknown>)?.timelineSpec as never ?? null} />
-        <CompareRadar original={original.health} current={currentVersion.health} />
+        
+        
       </>
       )}
       <ExportDialog
         open={exportOpen}
         isExporting={isExporting}
         progress={renderProgress}
+        renderStage={renderStage}
         outputUrl={renderedVideoUrl}
         script={currentScript}
         defaultVersion={defaultRenderVersion}
@@ -427,186 +474,6 @@ export default function ResultPage() {
         }}
       />
     </section>
-  );
-}
-
-// ── Review Panel: shown before render, user reviews AI prompts ──
-
-function ReviewPanel({
-  segments,
-  projectName,
-  onGenerate,
-  isRendering,
-}: {
-  segments: Array<{
-    id: string; type: string; script: string; visual: string; duration: number;
-    source: string; asset_id: string | null;
-    camera?: string; visual_fx?: string; emotion?: string;
-  }>;
-  projectName: string;
-  onGenerate: () => void;
-  isRendering: boolean;
-}) {
-  const aiSegments = segments.filter((s) => !s.asset_id || s.source === 'aigc');
-  const origSegments = segments.filter((s) => s.asset_id && s.source !== 'aigc');
-
-  const TYPE_LABELS: Record<string, string> = {
-    hook: 'HOOK', pain: 'PAIN', product: 'PRODUCT', proof: 'PROOF', cta: 'CTA',
-  };
-
-  const TYPE_COLOR: Record<string, string> = {
-    hook: '#E85D3A', pain: '#8B5CF6', product: '#3B82F6', proof: '#10B981', cta: '#F59E0B',
-  };
-
-  const totalDuration = segments.reduce((sum, s) => sum + (s.duration || 0), 0);
-
-  return (
-    <div className="relative rounded-2xl overflow-hidden" style={{ background: 'linear-gradient(180deg, #0D0D14 0%, #0A0A10 100%)' }}>
-      {/* Top accent bar */}
-      <div className="absolute top-0 left-0 right-0 h-px" style={{ background: 'linear-gradient(90deg, transparent, #FFB300 20%, #00E676 80%, transparent)' }} />
-
-      {/* Header row */}
-      <div className="flex items-center justify-between px-6 pt-5 pb-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="font-serif text-lg tracking-tight text-white">Storyboard Review</span>
-            <span className="text-[10px] font-mono text-slate-600 tracking-widest uppercase">Director's Cut</span>
-          </div>
-          <div className="flex items-center gap-3 mt-1.5">
-            <span className="text-[11px] font-mono text-slate-500">{segments.length} shots · {totalDuration.toFixed(1)}s total</span>
-            <span className="h-3 w-px bg-slate-800" />
-            <span className="inline-flex items-center gap-1.5 text-[11px] font-mono">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#FFB300] shadow-[0_0_6px_rgba(255,179,0,0.5)]" />
-              <span className="text-[#FFB300]">{aiSegments.length} AI</span>
-            </span>
-            {origSegments.length > 0 && (
-              <span className="inline-flex items-center gap-1.5 text-[11px] font-mono">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.5)]" />
-                <span className="text-emerald-400">{origSegments.length} original</span>
-              </span>
-            )}
-          </div>
-        </div>
-        <Button
-          variant="primary"
-          onClick={onGenerate}
-          disabled={isRendering}
-          className="relative overflow-hidden group"
-          style={{
-            background: 'linear-gradient(135deg, #FFB300 0%, #FF8F00 100%)',
-            border: 'none',
-            boxShadow: '0 0 24px rgba(255,179,0,0.2)',
-          }}
-        >
-          {isRendering ? (
-            <span className="flex items-center gap-2">
-              <span className="inline-block h-3.5 w-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-              <span className="text-[#0A0A10] font-bold text-xs tracking-wide">RENDERING</span>
-            </span>
-          ) : (
-            <span className="flex items-center gap-2">
-              <Play className="h-4 w-4 text-[#0A0A10]" />
-              <span className="text-[#0A0A10] font-bold text-xs tracking-wide">RENDER ALL</span>
-            </span>
-          )}
-          {/* Hover glow */}
-          <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300" style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.1), transparent)' }} />
-        </Button>
-      </div>
-
-      {/* Storyboard cards — horizontal timeline feel */}
-      <div className="px-6 pb-5 space-y-1.5">
-        {segments.map((seg, i) => {
-          const isAI = !seg.asset_id || seg.source === 'aigc';
-          const typeColor = TYPE_COLOR[seg.type] || '#6366F1';
-          const widthPct = ((seg.duration || 1) / totalDuration) * 100;
-
-          return (
-            <div
-              key={seg.id}
-              className="group relative flex items-center gap-4 rounded-xl transition-all duration-300 hover:translate-x-1"
-              style={{ animationDelay: `${i * 60}ms` }}
-            >
-              {/* Left accent + step number */}
-              <div className="flex-none flex flex-col items-center gap-1" style={{ width: 32 }}>
-                <div className="w-0.5 h-4 rounded-full" style={{ backgroundColor: typeColor }} />
-                <span className="text-[10px] font-mono font-bold text-slate-600">{String(i + 1).padStart(2, '0')}</span>
-                <div className="w-0.5 flex-1 min-h-[12px] rounded-full opacity-30" style={{ backgroundColor: i < segments.length - 1 ? typeColor : 'transparent' }} />
-              </div>
-
-              {/* Card body */}
-              <div
-                className="flex-1 min-w-0 rounded-lg px-4 py-3 transition-all duration-300 group-hover:translate-x-0.5"
-                style={{
-                  background: isAI
-                    ? `linear-gradient(135deg, rgba(255,179,0,0.06) 0%, rgba(255,179,0,0.02) 100%)`
-                    : `linear-gradient(135deg, rgba(16,185,129,0.04) 0%, rgba(16,185,129,0.01) 100%)`,
-                  border: `1px solid ${isAI ? 'rgba(255,179,0,0.12)' : 'rgba(16,185,129,0.1)'}`,
-                }}
-              >
-                <div className="flex items-center gap-3">
-                  {/* Type badge */}
-                  <span
-                    className="flex-none text-[10px] font-bold tracking-widest px-2 py-0.5 rounded"
-                    style={{ color: typeColor, background: `${typeColor}15` }}
-                  >
-                    {TYPE_LABELS[seg.type] ?? seg.type.toUpperCase()}
-                  </span>
-
-                  {/* Duration bar */}
-                  <div className="flex-1 h-1 rounded-full bg-slate-800 overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all duration-500"
-                      style={{ width: `${widthPct}%`, backgroundColor: isAI ? '#FFB300' : typeColor }}
-                    />
-                  </div>
-
-                  {/* Duration label */}
-                  <span className="flex-none text-[10px] font-mono text-slate-600">{seg.duration?.toFixed(1)}s</span>
-
-                  {/* Source badge */}
-                  <span
-                    className="flex-none text-[9px] font-mono font-bold tracking-wider px-2 py-0.5 rounded-full"
-                    style={{
-                      color: isAI ? '#FFB300' : '#34D399',
-                      background: isAI ? 'rgba(255,179,0,0.1)' : 'rgba(52,211,153,0.08)',
-                      border: `1px solid ${isAI ? 'rgba(255,179,0,0.2)' : 'rgba(52,211,153,0.15)'}`,
-                    }}
-                  >
-                    {isAI ? 'AI' : 'ORIGINAL'}
-                  </span>
-                </div>
-
-                {/* Script preview */}
-                <p className="text-[11px] text-slate-400 mt-2 truncate leading-relaxed" style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-                  {seg.script?.slice(0, 90) || '(no script)'}
-                </p>
-
-                {/* AI prompt copy button */}
-                {isAI && (
-                  <div className="flex items-center gap-3 mt-2 pt-2 border-t border-slate-800/50">
-                    <button
-                      type="button"
-                      className="text-[10px] font-mono text-[#FFB300]/70 hover:text-[#FFB300] transition-colors flex items-center gap-1.5"
-                      onClick={() => {
-                        const prompt = `9:16 vertical, product commercial. ${seg.visual || seg.script || ''} --ar 9:16 --style raw`;
-                        navigator.clipboard.writeText(prompt);
-                      }}
-                    >
-                      <Copy className="h-3 w-3" />
-                      COPY SEEDANCE PROMPT
-                    </button>
-                    <span className="text-[9px] text-slate-700 font-mono">
-                      {seg.camera || 'static'} · {seg.visual_fx || 'none'} · {seg.emotion || 'neutral'}
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
   );
 }
 

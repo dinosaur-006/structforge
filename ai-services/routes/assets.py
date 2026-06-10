@@ -50,7 +50,12 @@ def build_assets_router(repository: SQLiteRepository, settings: Settings) -> API
             recommendations = matcher.recommend_project_assets(project_id)
         except StructureNotFoundError:
             recommendations = {}
-        return [_to_asset_out(asset, recommendations.get(asset["id"])) for asset in repository.list_assets(project_id)]
+        # Filter out reference video assets — they're for analysis, not content
+        user_assets = [
+            a for a in repository.list_assets(project_id)
+            if not (a.get("analysis") or {}).get("reference_source")
+        ]
+        return [_to_asset_out(asset, recommendations.get(asset["id"])) for asset in user_assets]
 
     @router.get("/{project_id}/{asset_id}/thumbnail")
     async def get_asset_thumbnail(project_id: str, asset_id: str):

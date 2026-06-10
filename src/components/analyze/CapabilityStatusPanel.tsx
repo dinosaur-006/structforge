@@ -13,7 +13,7 @@ const items: Array<{ key: keyof Capabilities; Icon: typeof Sparkles }> = [
 
 export function CapabilityStatusPanel({ capabilities }: { capabilities: Capabilities }) {
   return (
-    <section className="rounded-lg border border-border bg-card p-4 shadow-sm" aria-label="能力运行状态">
+    <section className="rounded-xl border border-border/60 bg-white p-4 shadow-sm" aria-label="能力运行状态">
       <div className="mb-3 flex items-center justify-between gap-3">
         <h2 className="text-sm font-semibold text-text-primary">能力运行状态</h2>
         <span className="text-xs text-text-secondary">仅显示配置状态，真实可用性以执行结果为准</span>
@@ -32,7 +32,7 @@ function CapabilityStatusItem({ item, icon }: { item: CapabilityItem; icon: Reac
   const stateLabel = item.state === 'configured' ? '已配置' : item.state === 'worker' ? '异步' : item.state === 'fallback' ? '回退' : item.state === 'inline' ? '本地' : '未启用';
 
   return (
-    <div className="rounded-lg border border-border bg-surface p-3">
+    <div className="rounded-xl border border-border bg-surface p-3">
       <div className="flex items-center justify-between gap-2">
         <span className="inline-flex items-center gap-2 text-sm font-semibold text-text-primary">{icon}{item.label}</span>
         <Badge tone={tone}>{stateLabel}</Badge>

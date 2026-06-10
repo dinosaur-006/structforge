@@ -16,7 +16,7 @@ export function ScriptStructure({ segments }: { segments: ScriptSegment[] }) {
   const selected = segments.find((segment) => segment.id === selectedId) ?? segments[0];
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <div>
         <h3 className="font-semibold">{'\u53d9\u4e8b\u6bb5\u843d'} {'\u00b7'} {segments.length} {'\u4e2a\u5206\u955c\u7247\u6bb5'}</h3>
         <div className="mt-4 grid gap-3 sm:flex">
@@ -24,7 +24,7 @@ export function ScriptStructure({ segments }: { segments: ScriptSegment[] }) {
             <button
               key={segment.id}
               type="button"
-              className={cn('min-h-24 rounded-lg border border-l-2 border-border bg-card p-3 text-left shadow-sm transition-colors hover:border-primary/40', segmentColors[segment.type])}
+              className={cn('min-h-24 rounded-xl border border-l-2 border-border bg-card p-3 text-left shadow-sm transition-colors hover:border-primary/40', segmentColors[segment.type])}
               style={{ flexBasis: `${(segment.duration / total) * 100}%` }}
               onClick={() => setSelectedId(segment.id)}
             >
@@ -36,7 +36,7 @@ export function ScriptStructure({ segments }: { segments: ScriptSegment[] }) {
         </div>
       </div>
       {selected ? (
-        <div className="rounded-lg border border-border bg-sidebar/60 p-5">
+        <div className="rounded-xl border border-border bg-sidebar/60 p-5">
           <p className="text-sm text-text-secondary">{'\u7c7b\u578b'}</p>
           <h4 className="mt-1 text-lg font-semibold">{selected.label}</h4>
           <div className="mt-4 grid gap-3 text-sm md:grid-cols-2">

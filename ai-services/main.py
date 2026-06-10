@@ -141,18 +141,22 @@ def create_app() -> FastAPI:
                 else "未启用语音转写",
             },
             aigc={
-                "state": "configured" if settings.doubao_image_api_key else "disabled",
+                "state": "configured" if (settings.doubao_image_api_key or getattr(settings, 'runninghub_api_key', None)) else "disabled",
                 "label": "AIGC",
-                "detail": "Seedream AI 图片生成已配置"
+                "detail": "ComfyUI Flux 文生图已配置"
+                if getattr(settings, 'runninghub_api_key', None)
+                else "Seedream AI 图片生成已配置"
                 if settings.doubao_image_api_key
-                else "未配置图片生成，使用占位补全",
+                else "未配置图片生成，使用 Prompt Card 占位补全",
             },
             videoGeneration={
-                "state": "configured" if settings.doubao_llm_api_key else "disabled",
+                "state": "configured" if getattr(settings, 'runninghub_api_key', None) and getattr(settings, 'comfyui_video_enabled', False) else "disabled",
                 "label": "AI 视频生成",
-                "detail": "Seedance 1.5 Pro 视频生成已配置"
-                if settings.doubao_llm_api_key
-                else "未配置视频生成API Key",
+                "detail": "RunningHub WAN 2.2 图生视频已启用"
+                if getattr(settings, 'runninghub_api_key', None) and getattr(settings, 'comfyui_video_enabled', False)
+                else "RunningHub WAN 2.2 未启用 (设置 STRUCTFORGE_COMFYUI_VIDEO_ENABLED=true)"
+                if getattr(settings, 'runninghub_api_key', None)
+                else "未配置 RunningHub API Key",
             },
             taskExecution={
                 "state": "inline" if settings.celery_task_always_eager else "worker",
@@ -160,6 +164,27 @@ def create_app() -> FastAPI:
                 "detail": "本地同步任务模式" if settings.celery_task_always_eager else "Redis / Celery 异步任务模式",
             },
         )
+
+    @app.post(f"{API_PREFIX}/media/preview")
+    async def media_preview(prompt: str = Form(...), width: int = Form(512), height: int = Form(512)):
+        """Preview media generation — test a single image before full render."""
+        from services.comfyui_service import create_comfyui_service
+        import asyncio as _asyncio
+
+        svc = create_comfyui_service(settings)
+        if not svc.available:
+            raise HTTPException(status_code=503, detail="ComfyUI not configured")
+
+        try:
+            result = await _asyncio.wait_for(
+                svc.generate_image(prompt=prompt, width=width, height=height),
+                timeout=60,
+            )
+            return {"status": "completed", "url": result.get("url", ""), "prompt": prompt[:200]}
+        except _asyncio.TimeoutError:
+            raise HTTPException(status_code=504, detail="Preview timed out (60s)")
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Preview failed: {exc}")
 
     @app.get(f"{API_PREFIX}/diagnostics/llm")
     async def llm_diagnostics() -> dict[str, object]:
@@ -217,6 +242,44 @@ def create_app() -> FastAPI:
                 "message": f"LLM connectivity test failed: {exc}",
             }
 
+    @app.get(f"{API_PREFIX}/pipelines")
+    async def list_pipelines():
+        """List available rendering pipelines (Pixelle-Video pattern)."""
+        from services.pipeline_registry import registry as _reg
+        return [
+            {"name": s.name, "display_name": s.display_name, "icon": s.icon,
+             "description": s.description, "tags": s.tags,
+             "requires_comfyui": s.requires_comfyui, "requires_tts": s.requires_tts}
+            for s in _reg.list()
+        ]
+
+    @app.get(f"{API_PREFIX}/templates")
+    async def list_templates():
+        """List available HTML templates with metadata (Pixelle-Video pattern)."""
+        from services.template_util import list_templates as _list
+        return _list()
+
+    @app.post(f"{API_PREFIX}/image/generate")
+    async def generate_image(prompt: str = Form(...), width: int = Form(1080), height: int = Form(1920)):
+        """Generate an AI image via ComfyUI RunningHub Flux. Falls back to error if not configured."""
+        from services.comfyui_service import create_comfyui_service
+        import asyncio as _asyncio
+
+        svc = create_comfyui_service(settings)
+        if not svc.available:
+            raise HTTPException(status_code=503, detail="ComfyUI RunningHub not configured. Set STRUCTFORGE_RUNNINGHUB_API_KEY in .env")
+
+        try:
+            result = await _asyncio.wait_for(
+                svc.generate_image(prompt=prompt, width=width, height=height),
+                timeout=120,
+            )
+            return {"status": "completed", "url": result.get("url", "")}
+        except _asyncio.TimeoutError:
+            raise HTTPException(status_code=504, detail="Image generation timed out (120s)")
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Image generation failed: {exc}")
+
     @app.post(f"{API_PREFIX}/analyze", response_model=AnalyzeResponse)
     async def analyze_video(
         video: UploadFile = File(...),
@@ -255,11 +318,16 @@ def create_app() -> FastAPI:
         if job is None:
             raise HTTPException(status_code=404, detail="Analysis job not found")
 
+        # Strip internal fields that aren't part of VideoStructure schema
+        result = job.get("result")
+        if isinstance(result, dict):
+            result = {k: v for k, v in result.items() if not k.startswith("_")}
+
         return TaskProgress(
             status=job["status"],
             progress=job["progress"],
             stage=job["stage"],
-            result=job["result"],
+            result=result,
             error=job["error"],
         )
 
@@ -290,17 +358,17 @@ def create_app() -> FastAPI:
     async def list_analysis_samples(project_id: str) -> list[AnalysisSampleOut]:
         if repository.get_project(project_id) is None:
             raise HTTPException(status_code=404, detail="Project not found")
-        return [
-            AnalysisSampleOut(
-                job_id=job["job_id"],
-                status=job["status"],
-                progress=job["progress"],
-                stage=job["stage"],
-                result=job["result"],
-                isReference=job["isReference"],
-            )
-            for job in repository.list_project_jobs(project_id)
-        ]
+        results = []
+        for job in repository.list_project_jobs(project_id):
+            r = job.get("result")
+            if isinstance(r, dict):
+                r = {k: v for k, v in r.items() if not k.startswith("_")}
+            results.append(AnalysisSampleOut(
+                job_id=job["job_id"], status=job["status"],
+                progress=job["progress"], stage=job["stage"],
+                result=r, isReference=job.get("isReference", False),
+            ))
+        return results
 
     @app.put(f"{API_PREFIX}/analyze/project/{{project_id}}/reference/{{job_id}}", response_model=AnalysisSampleOut)
     async def select_analysis_reference(project_id: str, job_id: str) -> AnalysisSampleOut:
@@ -319,12 +387,15 @@ def create_app() -> FastAPI:
         job = repository.select_reference_job(project_id, job_id, selected_structure)
         if job is None:
             raise HTTPException(status_code=404, detail="Completed sample not found")
+        r = job.get("result")
+        if isinstance(r, dict):
+            r = {k: v for k, v in r.items() if not k.startswith("_")}
         return AnalysisSampleOut(
             job_id=job["job_id"],
             status=job["status"],
             progress=job["progress"],
             stage=job["stage"],
-            result=job["result"],
+            result=r,
             isReference=True,
         )
 

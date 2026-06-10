@@ -6,6 +6,8 @@ const ProjectListPage = lazy(() => import('./pages/ProjectListPage'));
 const AnalyzePage = lazy(() => import('./pages/AnalyzePage'));
 const MigratePage = lazy(() => import('./pages/MigratePage'));
 const ResultPage = lazy(() => import('./pages/ResultPage'));
+const HistoryPage = lazy(() => import('./pages/HistoryPage'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 
 export const router = createBrowserRouter([
@@ -17,6 +19,8 @@ export const router = createBrowserRouter([
       { path: '/analyze', element: <AnalyzePage /> },
       { path: '/migrate/:projectId', element: <MigratePage /> },
       { path: '/result/:projectId', element: <ResultPage /> },
+      { path: '/history', element: <HistoryPage /> },
+      { path: '/settings', element: <SettingsPage /> },
       { path: '*', element: <NotFoundPage /> },
     ],
   },

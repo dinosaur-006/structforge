@@ -12,7 +12,7 @@ export function AIReview({ data }: { data: unknown }) {
 
   const review = data as ReviewData;
   return (
-    <div className="rounded-lg border border-border bg-card px-4 py-3 shadow-sm space-y-3">
+    <div className="rounded-xl border border-border bg-white px-4 py-3 shadow-sm space-y-3">
       <div className="flex items-center gap-2">
         <p className="text-sm font-semibold text-primary">AI 深度评审</p>
         {review.overall_score ? (
@@ -23,7 +23,7 @@ export function AIReview({ data }: { data: unknown }) {
       {review.improvements?.length ? (
         <div className="space-y-2">
           {review.improvements.map((imp, i) => (
-            <div key={i} className="rounded-md border border-border-visible bg-card-hover p-2">
+            <div key={i} className="rounded-md border border-border-visible bg-white-hover p-2">
               <p className="text-xs font-medium text-text-primary">{imp.point}</p>
               <p className="mt-0.5 text-xs text-success">{imp.expected_effect}</p>
             </div>
@@ -49,7 +49,7 @@ export function AIReview({ data }: { data: unknown }) {
 
 function ReviewText({ text }: { text: string }) {
   return (
-    <div className="rounded-lg border border-border bg-card px-4 py-3 shadow-sm">
+    <div className="rounded-xl border border-border bg-white px-4 py-3 shadow-sm">
       <p className="text-sm font-semibold text-primary">AI 评审意见</p>
       <p className="mt-1 text-sm leading-6 text-text-secondary">{text}</p>
     </div>

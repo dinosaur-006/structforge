@@ -86,7 +86,22 @@ class GapDetector:
 
     def _available_strategies(self, assets: list[dict[str, Any]]) -> list[dict[str, Any]]:
         has_video_asset = any(asset["type"] == "video" and asset.get("file_path") for asset in assets)
-        has_aigc_config = bool(self.settings.jimeng_image_endpoint and self.settings.jimeng_image_api_key)
+        # AIGC is available with either Jimeng or ComfyUI RunningHub
+        has_aigc_config = bool(
+            (self.settings.jimeng_image_endpoint and self.settings.jimeng_image_api_key)
+            or getattr(self.settings, 'runninghub_api_key', None)
+            or getattr(self.settings, 'doubao_image_api_key', None)
+        )
+        aigc_detail = None
+        if not has_aigc_config:
+            aigc_detail = "未配置图片生成 API，将使用占位风格补全"
+        elif getattr(self.settings, 'runninghub_api_key', None):
+            aigc_detail = "ComfyUI Flux 文生图可用"
+        elif self.settings.jimeng_image_endpoint and self.settings.jimeng_image_api_key:
+            aigc_detail = "即梦 AI 图片生成可用"
+        else:
+            aigc_detail = "豆包 Seedream 图片生成可用"
+
         # reorder is available when there are matched assets that could fill critical positions.
         has_matched_assets = any(
             asset.get("match_status") in ("matched", "partial") for asset in assets
@@ -94,7 +109,7 @@ class GapDetector:
         availability = {
             "reorder": (has_matched_assets, None if has_matched_assets else "无可匹配的素材用于重排优化"),
             "packaging": (True, None),
-            "aigc": (True, None if has_aigc_config else "未配置即梦 API，将使用占位风格补全"),
+            "aigc": (True, aigc_detail),
             "recompose": (has_video_asset, None if has_video_asset else "需要可用视频素材"),
         }
         return [

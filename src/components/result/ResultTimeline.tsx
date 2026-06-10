@@ -84,7 +84,7 @@ export function ResultTimeline({ segments, waveform, currentTime, onSeek, onTrim
   for (let t = 0; t <= total; t += tickInterval) ticks.push(t);
 
   return (
-    <section className="rounded-lg border border-border bg-card shadow-sm overflow-hidden">
+    <section className="rounded-xl border border-border bg-white shadow-sm overflow-hidden">
       {/* Header — smart legend: only show types actually present */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-border">
         <SmartLegend segments={segments} />
@@ -131,7 +131,7 @@ export function ResultTimeline({ segments, waveform, currentTime, onSeek, onTrim
           <span className="text-[10px] font-medium text-text-muted -rotate-90 whitespace-nowrap">视频</span>
         </div>
         <div className="flex-1 flex items-stretch gap-[2px] p-[2px] min-w-0">
-          {segments.map((seg) => {
+          {segments.map((seg, i) => {
             const meta = sourceMeta[seg.source];
             const widthPct = Math.max(3, ((seg.end - seg.start) / total) * 100);
             return (
@@ -143,7 +143,7 @@ export function ResultTimeline({ segments, waveform, currentTime, onSeek, onTrim
                 thumbnailUrl={thumbnails[seg.id]}
                 onSeek={() => onSeek(seg.start)}
                 onTrimStart={onTrim ? (edge, e) => handleTrimStart(seg.id, edge, e) : undefined}
-                onHover={() => loadThumbnail(seg, thumbnails, setThumbnails)}
+                onHover={() => loadThumbnail(seg, i, thumbnails, setThumbnails)}
               />
             );
           })}
@@ -225,7 +225,7 @@ function SegmentBlock({
         <div
           className="absolute inset-0 opacity-20 pointer-events-none"
           style={{
-            backgroundImage: 'repeating-linear-gradient(-45deg, transparent, transparent 6px, rgba(255,179,0,0.15) 6px, rgba(255,179,0,0.15) 8px)',
+            backgroundImage: 'repeating-linear-gradient(-45deg, transparent, transparent 6px, rgba(200,132,60,0.12) 6px, rgba(200,132,60,0.12) 8px)',
           }}
         />
       )}
@@ -293,13 +293,33 @@ function SegmentBlock({
 
 function loadThumbnail(
   seg: ResultTimelineSegment,
+  index: number,
   cache: Record<string, string>,
   setCache: React.Dispatch<React.SetStateAction<Record<string, string>>>,
 ) {
   if (cache[seg.id]) return;
-  // We need projectId — derive from URL or prop
   const projectId = window.location.pathname.split('/').pop() || '';
   if (!projectId) return;
+
+  // For AI-generated segments, try Flux preview image first
+  const isAI = seg.source === 'aigc' || seg.source === 'aigc_draft';
+  if (isAI) {
+    const fluxUrl = `${API_BASE_URL}/outputs/${projectId}/flux_previews/segment_${String(index).padStart(3, '0')}.png`;
+    const img = new Image();
+    img.onload = () => setCache((prev) => ({ ...prev, [seg.id]: fluxUrl }));
+    img.onerror = () => {
+      // Fall back to video frame thumbnail API
+      const url = `${API_BASE_URL}/api/v1/optimize/${projectId}/thumbnail?t=${seg.start.toFixed(1)}`;
+      fetch(url)
+        .then((r) => r.json())
+        .then((data) => {
+          if (data?.thumbnail) setCache((prev) => ({ ...prev, [seg.id]: data.thumbnail }));
+        })
+        .catch(() => {});
+    };
+    img.src = fluxUrl;
+    return;
+  }
 
   const url = `${API_BASE_URL}/api/v1/optimize/${projectId}/thumbnail?t=${seg.start.toFixed(1)}`;
   fetch(url)

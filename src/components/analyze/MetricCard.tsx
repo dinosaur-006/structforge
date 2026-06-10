@@ -25,7 +25,7 @@ const scoreTier = (score: number) =>
 
 /** Glow-dot indicator — the user's "status dot with shadow" concept. */
 const DOT_STYLE: Record<string, string> = {
-  emerald: 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]',
+  emerald: 'bg-emerald-400 shadow-[0_0_8px_rgba(74,158,124,0.4)]',
   amber: 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]',
   red: 'bg-red-400 shadow-[0_0_8px_rgba(248,113,113,0.6)]',
 };
@@ -41,11 +41,11 @@ export function MetricCard({ metric }: { metric: MetricData }) {
     <div
       className={cn(
         'relative flex flex-col p-5 overflow-hidden transition-all duration-300',
-        'bg-slate-900 rounded-2xl ring-1 ring-white/5 hover:ring-white/15',
+        'bg-white rounded-2xl border border-[#EBEAE6] shadow-[0_1px_3px_rgba(0,0,0,0.02)] hover:shadow-[0_2px_8px_rgba(0,0,0,0.04)]',
         'group',
       )}
     >
-      {/* ── Top-edge neon glow line ── */}
+      {/* ── Top-edge accent line ── */}
       <div
         className={cn(
           'absolute top-0 left-1/4 w-1/2 h-px bg-gradient-to-r to-transparent',
@@ -55,42 +55,31 @@ export function MetricCard({ metric }: { metric: MetricData }) {
         style={{ color: ringColor }}
       />
 
-      {/* Header row: name + glow-dot + raw_value chip */}
+      {/* Header row */}
       <div className="flex justify-between items-start mb-3">
-        <h3 className="text-sm font-medium text-slate-400 tracking-wide truncate flex-1 min-w-0">
+        <h3 className="text-sm font-medium text-[#6E6E73] truncate flex-1 min-w-0">
           {metric.name}
         </h3>
 
         <div className="flex items-center gap-2 flex-none ml-2">
-          {/* Original / raw value chip (user's "原: X" concept) */}
           {metric.raw_value && (
-            <span className="px-2 py-0.5 text-[10px] font-mono text-slate-300 bg-slate-800 rounded-full ring-1 ring-white/5">
-              原: {metric.raw_value}
+            <span className="px-2 py-0.5 text-[10px] font-medium text-[#6E6E73] bg-[#FAFAF9] rounded-full border border-[#EBEAE6]">
+              {metric.raw_value}
             </span>
           )}
-          {/* Glow-dot status indicator */}
-          <span
-            className={cn(
-              'w-2 h-2 rounded-full',
-              DOT_STYLE[tier],
-            )}
-          />
+          <span className={cn('w-2 h-2 rounded-full', DOT_STYLE[tier])} />
         </div>
       </div>
 
       {/* Score + ring */}
       <div className="flex items-center gap-4 mb-3">
-        <span className="text-3xl font-light font-mono text-slate-100">
+        <span className="text-3xl font-light text-[#1C1C1E]">
           {metric.score}
         </span>
         <div className="relative h-10 w-10 flex-none">
           <svg className="h-10 w-10 -rotate-90" viewBox="0 0 44 44">
-            <circle
-              cx="22" cy="22" r="18" fill="none"
-              stroke="rgba(255,255,255,0.06)" strokeWidth="3"
-            />
-            <circle
-              cx="22" cy="22" r="18" fill="none"
+            <circle cx="22" cy="22" r="18" fill="none" stroke="#EBEAE6" strokeWidth="3" />
+            <circle cx="22" cy="22" r="18" fill="none"
               stroke={ringColor} strokeWidth="3" strokeLinecap="round"
               strokeDasharray={circumference} strokeDashoffset={dashOffset}
               style={{ transition: 'stroke-dashoffset 0.8s ease' }}
@@ -99,9 +88,8 @@ export function MetricCard({ metric }: { metric: MetricData }) {
         </div>
       </div>
 
-      {/* Evidence / description */}
       {metric.evidence && (
-        <p className="text-xs text-slate-500 mt-auto line-clamp-2 leading-relaxed">
+        <p className="text-xs text-[#AEAEB2] mt-auto line-clamp-2 leading-relaxed">
           {metric.evidence}
         </p>
       )}

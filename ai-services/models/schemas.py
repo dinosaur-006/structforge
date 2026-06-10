@@ -23,6 +23,7 @@ class VideoMeta(StrictModel):
     shots: int = Field(ge=0)
     coverLabel: str
     productName: str = ""
+    coverImagePath: str | None = None
 
 
 SegmentType = Literal["hook", "pain", "product", "proof", "cta"]
@@ -45,6 +46,8 @@ class ScriptSegment(StrictModel):
     subtitlePreset: str | None = None
     transition: str | None = None
     beatAligned: bool | None = None
+    shot_count: int | None = Field(default=None, ge=1, description="镜头数 (L2 rhythm structure)")
+    avg_shot_duration: float | None = Field(default=None, ge=0, description="平均镜头时长")
 
 
 class RhythmPoint(StrictModel):
@@ -94,6 +97,8 @@ class VideoStructure(StrictModel):
     rhythm: list[RhythmPoint] = Field(min_length=1)
     packaging: PackagingStructure
     health: HealthScores
+    highlightMoments: list[dict[str, Any]] | None = None
+    shot_pool: list[dict[str, Any]] | None = None
 
 
 class TaskProgress(StrictModel):
@@ -431,6 +436,7 @@ class RenderRequest(StrictModel):
     version: RenderVersion
     resolution: RenderResolution = "1080p"
     script_version: FinalScriptStyle | None = None
+    segment_modes: dict[str, str] | None = None  # {segment_id: "image"|"video"}
 
 
 class RenderJobResponse(StrictModel):

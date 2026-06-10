@@ -4,90 +4,62 @@ export default {
   theme: {
     extend: {
       colors: {
-        // ── Studio Black Base ──
-        surface: '#050508',
-        card: '#0A0A10',
-        'card-hover': '#0E0E16',
-        'card-raised': '#111118',
-        border: 'rgba(255,255,255,0.05)',
-        'border-visible': 'rgba(255,255,255,0.08)',
-        sidebar: '#08080D',
-        'sidebar-hover': '#0E0E14',
+        // ── Swiss Spa Premium Base ──
+        surface: '#FAFAF9',
+        card: '#FFFFFF',
+        'card-hover': '#FAFAF9',
+        'card-raised': '#FFFFFF',
+        border: '#EBEAE6',
+        'border-visible': '#D1CFC8',
+        sidebar: '#FFFFFF',
+        'sidebar-hover': '#FAFAF9',
 
-        // ── Neon Amber Primary (timeline marker yellow) ──
-        primary: '#FFB300',
-        'primary-hover': '#FFC233',
-        'primary-active': '#E5A100',
-        'primary-muted': 'rgba(255,179,0,0.08)',
-        'primary-glow': 'rgba(255,179,0,0.20)',
+        // ── Burnished Gold Primary ──
+        primary: '#C8843C',
+        'primary-hover': '#B07530',
+        'primary-active': '#A06828',
+        'primary-muted': '#F5F2EC',
+        'primary-glow': 'rgba(200,132,60,0.08)',
 
-        // ── Waveform Green Secondary (audio meter green) ──
-        accent: '#00E676',
-        'accent-hover': '#33EC91',
-        'accent-muted': 'rgba(0,230,118,0.08)',
-        'accent-glow': 'rgba(0,230,118,0.15)',
+        // ── Sage Green Secondary ──
+        accent: '#4A9E7C',
+        'accent-hover': '#3D8A6A',
+        'accent-muted': 'rgba(74,158,124,0.08)',
+        'accent-glow': 'rgba(74,158,124,0.10)',
 
         // ── Text Hierarchy ──
-        'text-primary': '#E8E6E0',
-        'text-secondary': '#8A8882',
-        'text-muted': '#545250',
+        'text-primary': '#1C1C1E',
+        'text-secondary': '#6E6E73',
+        'text-muted': '#AEAEB2',
 
-        // ── Semantic (muted studio tones) ──
-        success: '#00E676',
-        'success-muted': 'rgba(0,230,118,0.08)',
-        warning: '#FFB300',
-        'warning-muted': 'rgba(255,179,0,0.08)',
-        error: '#FF5252',
-        'error-muted': 'rgba(255,82,82,0.08)',
-        info: '#448AFF',
+        // ── Semantic ──
+        success: '#4A9E7C',
+        'success-muted': 'rgba(74,158,124,0.08)',
+        warning: '#C8843C',
+        'warning-muted': '#F5F2EC',
+        error: '#D45A5A',
+        'error-muted': 'rgba(212,90,90,0.08)',
+        info: '#7A9BB5',
       },
       boxShadow: {
-        soft: '0 1px 2px rgba(0,0,0,0.6)',
-        card: '0 0 0 0.5px rgba(255,255,255,0.04), 0 1px 3px rgba(0,0,0,0.6)',
-        raised: '0 0 0 0.5px rgba(255,255,255,0.06), 0 4px 24px rgba(0,0,0,0.7)',
-        glow: '0 0 30px rgba(255,179,0,0.12), 0 0 60px rgba(255,179,0,0.04)',
-        'glow-green': '0 0 30px rgba(0,230,118,0.10), 0 0 60px rgba(0,230,118,0.03)',
-        'neon-border': '0 0 0 0.5px rgba(255,179,0,0.3), 0 0 12px rgba(255,179,0,0.08)',
+        soft: '0 1px 2px rgba(0,0,0,0.03)',
+        card: '0 0 0 0.5px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.03)',
+        raised: '0 0 0 0.5px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
+        glow: '0 0 30px rgba(200,132,60,0.06), 0 0 60px rgba(200,132,60,0.02)',
+        'glow-green': '0 0 30px rgba(74,158,124,0.06), 0 0 60px rgba(74,158,124,0.02)',
+        'neon-border': '0 0 0 0.5px rgba(200,132,60,0.15), 0 0 8px rgba(200,132,60,0.04)',
       },
       fontFamily: {
-        sans: ['DM Sans', "'Noto Sans SC'", 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        sans: ['Inter', "'Noto Sans SC'", 'ui-sans-serif', 'system-ui', 'sans-serif'],
         mono: ['JetBrains Mono', "'Noto Sans SC'", 'ui-monospace', 'monospace'],
-        display: ['DM Sans', "'Noto Sans SC'", 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        display: ['Inter', "'Noto Sans SC'", 'ui-sans-serif', 'system-ui', 'sans-serif'],
       },
       borderRadius: {
-        sm: '4px',
-        DEFAULT: '6px',
-        lg: '10px',
-        xl: '14px',
-      },
-      keyframes: {
-        'flicker': {
-          '0%, 100%': { opacity: '1' },
-          '50%': { opacity: '0.97' },
-        },
-        'scanline': {
-          '0%': { transform: 'translateY(0)' },
-          '100%': { transform: 'translateY(4px)' },
-        },
-        'reveal-right': {
-          '0%': { transform: 'scaleX(0)', transformOrigin: 'left' },
-          '100%': { transform: 'scaleX(1)', transformOrigin: 'left' },
-        },
-        'pulse-neon': {
-          '0%, 100%': { boxShadow: '0 0 4px rgba(255,179,0,0.2)' },
-          '50%': { boxShadow: '0 0 16px rgba(255,179,0,0.4)' },
-        },
-        'meter-bar': {
-          '0%': { width: '0%' },
-          '100%': { width: 'var(--meter-width)' },
-        },
-      },
-      animation: {
-        'flicker': 'flicker 4s ease-in-out infinite',
-        'scanline': 'scanline 0.1s linear infinite',
-        'reveal-right': 'reveal-right 0.4s ease-out',
-        'pulse-neon': 'pulse-neon 2s ease-in-out infinite',
-        'meter-bar': 'meter-bar 0.6s ease-out forwards',
+        sm: '8px',
+        DEFAULT: '12px',
+        lg: '16px',
+        xl: '20px',
+        '2xl': '24px',
       },
     },
   },

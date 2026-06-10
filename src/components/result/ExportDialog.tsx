@@ -7,6 +7,7 @@ interface ExportDialogProps {
   open: boolean;
   isExporting: boolean;
   progress: number;
+  renderStage?: string;
   outputUrl: string | null;
   script: FinalScript | null;
   defaultVersion: RenderVersion;
@@ -18,7 +19,7 @@ interface ExportDialogProps {
   onDownloadSrt: () => void;
 }
 
-export function ExportDialog({ open, isExporting, progress, outputUrl, script, defaultVersion, renderDisabled = false, renderDisabledReason, onClose, onExport, onDownloadJson, onDownloadSrt }: ExportDialogProps) {
+export function ExportDialog({ open, isExporting, progress, renderStage, outputUrl, script, defaultVersion, renderDisabled = false, renderDisabledReason, onClose, onExport, onDownloadJson, onDownloadSrt }: ExportDialogProps) {
   const [exportStarted, setExportStarted] = useState(false);
 
   const handleExport = () => {
@@ -58,17 +59,19 @@ export function ExportDialog({ open, isExporting, progress, outputUrl, script, d
               将生成 1080p 竖屏视频，自动包含字幕和背景音乐。
             </p>
             {renderDisabled && renderDisabledReason ? (
-              <p className="rounded-lg border border-warning/40 bg-warning-muted p-3 text-sm text-text-secondary">{renderDisabledReason}</p>
+              <p className="rounded-xl border border-warning/40 bg-warning-muted p-3 text-sm text-text-secondary">{renderDisabledReason}</p>
             ) : null}
           </>
         ) : isExporting ? (
           <div className="space-y-3">
             <p className="text-sm font-medium text-text-primary">
-              {progress > 0 && progress < 100
-                ? `正在渲染分镜 ${Math.max(1, Math.round(progress / 20))}/5...`
-                : progress === 0
-                  ? '正在启动渲染引擎...'
-                  : '正在完成渲染...'}
+              {renderStage
+                ? renderStage
+                : progress > 0 && progress < 100
+                  ? `正在渲染分镜 ${Math.max(1, Math.round(progress / 20))}/5...`
+                  : progress === 0
+                    ? '正在启动渲染引擎...'
+                    : '正在完成渲染...'}
             </p>
             <div className="flex justify-between text-xs text-text-secondary">
               <span>进度</span>
@@ -87,7 +90,7 @@ export function ExportDialog({ open, isExporting, progress, outputUrl, script, d
             <a
               href={outputUrl}
               download
-              className="inline-flex min-h-11 items-center rounded-lg bg-primary px-6 text-sm font-semibold text-surface transition-colors hover:bg-primary-hover"
+              className="inline-flex min-h-11 items-center rounded-xl bg-primary px-6 text-sm font-semibold text-surface transition-colors hover:bg-primary-hover"
             >
               下载视频
             </a>

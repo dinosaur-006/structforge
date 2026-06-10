@@ -7,7 +7,7 @@ describe('CreativeBriefPanel', () => {
   it('saves product name and selling points', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     const user = userEvent.setup();
-    render(<CreativeBriefPanel brief={undefined} onSave={onSave} />);
+    render(<CreativeBriefPanel brief={undefined} projectId="test-proj" onSave={onSave} />);
 
     await user.type(screen.getByPlaceholderText(/产品名称/), 'Quiet Pro');
     await user.type(screen.getByPlaceholderText(/核心卖点/), '主动降噪\n轻盈佩戴');

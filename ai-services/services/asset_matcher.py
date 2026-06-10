@@ -74,22 +74,14 @@ class AssetMatcher:
         if not assets:
             return []
 
-        # Try LLM semantic matching first.
-        llm_matches: dict[tuple[str, str], float] = {}
-        if self._llm_available:
-            llm_matches = self._llm_match(assets, structure.script)
-
+        # Rule-based keyword matching (fast, no LLM call needed)
         matches: list[dict[str, Any]] = []
         best_by_asset: dict[str, tuple[float, str]] = {}
 
         for asset in assets:
             searchable = _asset_searchable_text(asset)
             for segment in structure.script:
-                pair_key = (asset["id"], segment.id)
-                if pair_key in llm_matches:
-                    score = llm_matches[pair_key]
-                else:
-                    score = _keyword_score(searchable, ROLE_KEYWORDS.get(segment.type, []))
+                score = _keyword_score(searchable, ROLE_KEYWORDS.get(segment.type, []))
 
                 # ── Scene type boost: direct type match → +25 ──
                 asset_scene = str((asset.get("analysis") or {}).get("scene_type", "") or "")

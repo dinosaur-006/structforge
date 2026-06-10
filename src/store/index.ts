@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { api, ApiError } from '../services/api';
 import { mockAnalysisResult } from '../mocks/analysisResult';
+
+const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://127.0.0.1:8000';
 import { humanizeError } from '../shared/errorMessages';
 import { uid } from '../shared/format';
 import type {
@@ -68,6 +70,8 @@ function initialState() {
     renderJobId: null,
     renderStatus: 'idle' as RenderStatus,
     renderProgress: 0,
+    renderStage: '',
+    renderWarnings: [] as string[],
     outputUrl: null,
     renderError: null,
     isExporting: false,
@@ -115,6 +119,8 @@ interface AppState {
   renderJobId: string | null;
   renderStatus: RenderStatus;
   renderProgress: number;
+  renderStage: string;
+  renderWarnings: string[];
   outputUrl: string | null;
   renderError: string | null;
   isExporting: boolean;
@@ -336,6 +342,47 @@ export const useAppStore = create<AppState>()(
           const job = await api.startAnalysis(file, targetProjectId);
           set({ uploadProgress: 100, stage: analysisStages[0] });
 
+          // \u2500\u2500 SSE: real-time progress stream \u2500\u2500
+          const streamResult = await new Promise<boolean>((resolve, reject) => {
+            const es = new EventSource(`${API_BASE}/api/v1/analyze/${job.job_id}/stream`);
+            es.onmessage = (event) => {
+              try {
+                const data = JSON.parse(event.data);
+                set({ progress: data.progress, stage: data.stage });
+                if (data.status === 'completed') {
+                  es.close();
+                  resolve(true);
+                } else if (data.status === 'failed') {
+                  es.close();
+                  reject(new Error(data.error || '\u5206\u6790\u5931\u8d25'));
+                }
+              } catch { /* skip malformed event */ }
+            };
+            es.onerror = () => {
+              es.close();
+              // Fall back to polling if SSE fails
+              resolve(false);
+            };
+          });
+
+          if (streamResult) {
+            // SSE completed successfully \u2014 fetch final result
+            const status = await api.getAnalysis(job.job_id);
+            if (!status.result) throw new Error('\u5206\u6790\u7ed3\u679c\u4e3a\u7a7a');
+            set({
+              isAnalyzing: false,
+              progress: 100,
+              analysisResult: status.result,
+              currentStructure: status.result,
+              activeProjectId: targetProjectId,
+              gaps: [],
+            });
+            await get().fetchAnalysisSamples(targetProjectId);
+            await get().fetchProjects();
+            return targetProjectId;
+          }
+
+          // \u2500\u2500 SSE fallback: polling \u2500\u2500
           for (;;) {
             const status = await api.getAnalysis(job.job_id);
             set({ progress: status.progress, stage: status.stage });
@@ -421,8 +468,8 @@ export const useAppStore = create<AppState>()(
           const gapResponse = await api.listGaps(projectId);
           set({
             currentStructure: structure,
-            gaps: gapResponse.gaps,
             assets,
+            gaps: gapResponse.gaps,
           });
         } catch (error) {
           const message = getErrorMessage(error);
@@ -673,7 +720,7 @@ export const useAppStore = create<AppState>()(
           get().addToast({ tone: 'error', title: '\u8bc4\u4f30\u6570\u636e\u52a0\u8f7d\u5931\u8d25', description: message });
         }
       },
-      startRender: async (projectId, version, resolution = '1080p', scriptVersion) => {
+      startRender: async (projectId, version, resolution = '1080p', scriptVersion, segmentModes) => {
         set({
           isExporting: true,
           renderStatus: 'pending',
@@ -684,7 +731,7 @@ export const useAppStore = create<AppState>()(
           activeProjectId: projectId,
         });
         try {
-          const response = await api.startRender(projectId, version, resolution, scriptVersion);
+          const response = await api.startRender(projectId, version, resolution, scriptVersion, segmentModes);
           set({ renderJobId: response.job_id });
           await get().pollRenderJob(response.job_id);
         } catch (error) {
@@ -695,6 +742,55 @@ export const useAppStore = create<AppState>()(
       },
       pollRenderJob: async (jobId) => {
         try {
+          // \u2500\u2500 SSE: real-time render progress with stage + warnings \u2500\u2500
+          const streamOk = await new Promise<boolean>((resolve) => {
+            const es = new EventSource(`${API_BASE}/api/v1/render/${jobId}/stream`);
+            es.onmessage = (event) => {
+              try {
+                const data = JSON.parse(event.data);
+                set((s) => ({
+                  renderStatus: data.status,
+                  renderProgress: data.progress,
+                  renderStage: data.stage || s.renderStage,
+                  renderWarnings: data.warnings || s.renderWarnings,
+                }));
+                if (data.status === 'completed') {
+                  es.close();
+                  resolve(true);
+                } else if (data.status === 'failed') {
+                  const msg = data.error || '\u6e32\u67d3\u5931\u8d25';
+                  const warns = data.warnings || [];
+                  try { sessionStorage.setItem('lastRenderError', JSON.stringify({ error: msg, warnings: warns })); } catch {}
+                  set({ isExporting: false, renderError: msg, renderStatus: 'failed', renderStage: '' });
+                  get().addToast({ tone: 'error', title: '\u6e32\u67d3\u5931\u8d25', description: msg });
+                  es.close();
+                  resolve(true);
+                }
+              } catch { /* skip */ }
+            };
+            es.onerror = () => { es.close(); resolve(false); };
+          });
+
+          if (streamOk) {
+            // SSE completed \u2014 fetch final output URL
+            const finalStatus = await api.getRenderJob(jobId);
+            const videoUrl = finalStatus.output_url || null;
+            console.log('[StructForge] SSE render complete, outputUrl:', videoUrl);
+            set({
+              isExporting: false,
+              renderStatus: 'completed',
+              renderProgress: 100,
+              outputUrl: videoUrl,
+              renderStage: '',
+            });
+            // If no output URL from SSE path, fall through to polling
+            if (videoUrl) {
+              get().addToast({ tone: 'success', title: '\u89c6\u9891\u751f\u6210\u5b8c\u6210' });
+              return;
+            }
+          }
+
+          // \u2500\u2500 Polling fallback \u2500\u2500
           for (;;) {
             const status = await api.getRenderJob(jobId);
             set({
@@ -704,6 +800,7 @@ export const useAppStore = create<AppState>()(
               renderError: status.error ?? null,
             });
             if (status.status === 'completed') {
+              console.log('[StructForge] Polling render complete, outputUrl:', status.output_url);
               set({ isExporting: false });
               get().addToast({ tone: 'success', title: '\u89c6\u9891\u751f\u6210\u5b8c\u6210' });
               return;

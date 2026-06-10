@@ -12,7 +12,7 @@ export function PackagingStructure({ data }: { data: Packaging }) {
       {cards.map((card) => {
         const Icon = card.icon;
         return (
-          <div key={card.title} className="rounded-lg border border-border bg-card p-5 shadow-sm">
+          <div key={card.title} className="rounded-xl border border-border bg-card p-5 shadow-sm">
             <Icon className="h-6 w-6 text-primary" />
             <h3 className="mt-4 font-semibold">{card.title}</h3>
             <ul className="mt-3 space-y-2 text-sm text-text-secondary">

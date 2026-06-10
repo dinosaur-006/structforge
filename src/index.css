@@ -1,71 +1,39 @@
 /* ═══════════════════════════════════════════════════════════════════
-   StructForge — Video Editing Studio Aesthetic
-   Studio Black · Neon Amber · Waveform Green · Precision Typography
+   StructForge — Swiss Spa Premium
+   Warm white · Burnished gold · Sage green · Inter typography
    ═══════════════════════════════════════════════════════════════════ */
 
-/* ── DM Sans (UI) + JetBrains Mono (Data) ── */
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@300;400;500;600&family=Noto+Sans+SC:wght@300;400;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600&family=Noto+Sans+SC:wght@300;400;500;700&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  --meter-width: 0%;
 }
 
 * { box-sizing: border-box; }
 
 html {
   min-width: 320px;
-  background: #050508;
+  background: #FAFAF9;
 }
 
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100dvh;
-  background: #050508;
-  color: #E8E6E0;
-  font-family: 'DM Sans', 'Noto Sans SC', ui-sans-serif, system-ui, sans-serif;
-  position: relative;
+  background: #FAFAF9;
+  color: #1C1C1E;
+  font-family: 'Inter', 'Noto Sans SC', ui-sans-serif, system-ui, sans-serif;
 }
 
-/* ═══════════════════════════════════════════════════════════════════
-   Studio Atmosphere — Noise + Vignette + Scanlines
-   ═══════════════════════════════════════════════════════════════════ */
-
-/* ── 16mm Film Grain Overlay ── */
-body::after {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  pointer-events: none;
-  opacity: 0.025;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 300 300' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='6' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-}
-
-/* ── Subtle edge vignette ── */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: 9998;
-  pointer-events: none;
-  background: radial-gradient(ellipse at 50% 0%, transparent 55%, rgba(5,5,8,0.4) 100%);
-}
-
-/* ═══════════════════════════════════════════════════════════════════
-   Typography
-   ═══════════════════════════════════════════════════════════════════ */
-
-/* ── Data/Metrics — Terminal Precision ── */
+/* ── Data/Metrics ── */
 .font-metrics {
   font-family: 'JetBrains Mono', 'Noto Sans SC', monospace;
   letter-spacing: 0.02em;
@@ -74,252 +42,6 @@ body::before {
 
 /* ── Display Headings ── */
 .font-display {
-  font-family: 'DM Sans', 'Noto Sans SC', ui-sans-serif, system-ui, sans-serif;
+  font-family: 'Inter', 'Noto Sans SC', ui-sans-serif, system-ui, sans-serif;
   letter-spacing: -0.02em;
-}
-
-/* ═══════════════════════════════════════════════════════════════════
-   Studio Monitor Effects
-   ═══════════════════════════════════════════════════════════════════ */
-
-/* ── CRT Scanline — for sidebar, dark panels ── */
-.scanline {
-  position: relative;
-}
-.scanline::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0.03;
-  background: repeating-linear-gradient(
-    0deg,
-    transparent,
-    transparent 3px,
-    rgba(255,255,255,0.06) 3px,
-    rgba(255,255,255,0.06) 6px
-  );
-  z-index: 1;
-}
-
-/* ── Neon Border Glow on Hover ── */
-.neon-hover {
-  transition: border-color 0.3s ease, box-shadow 0.3s ease;
-}
-.neon-hover:hover {
-  border-color: rgba(255,179,0,0.3) !important;
-  box-shadow: 0 0 0 0.5px rgba(255,179,0,0.15), 0 0 20px rgba(255,179,0,0.06);
-}
-
-/* ── Meter Bar — audio-level style progress ── */
-.meter-bar {
-  height: 3px;
-  background: linear-gradient(90deg, #00E676 0%, #FFB300 60%, #FF5252 100%);
-  width: var(--meter-width);
-  transition: width 0.4s ease;
-  border-radius: 0 2px 2px 0;
-}
-
-/* ── Waveform Green Glow ── */
-.glow-green {
-  text-shadow: 0 0 12px rgba(0,230,118,0.3);
-}
-
-/* ── Amber Metric Glow ── */
-.glow-amber {
-  text-shadow: 0 0 16px rgba(255,179,0,0.25);
-}
-
-/* ═══════════════════════════════════════════════════════════════════
-   Cards & Surfaces
-   ═══════════════════════════════════════════════════════════════════ */
-
-/* ── Glass Card — subtle translucency ── */
-.glass-card {
-  background: rgba(10,10,16,0.85);
-  backdrop-filter: blur(12px);
-  border: 0.5px solid rgba(255,255,255,0.06);
-}
-
-/* ── Card with Top Accent Line ── */
-.card-topline {
-  position: relative;
-  overflow: hidden;
-}
-.card-topline::before {
-  content: '';
-  position: absolute;
-  top: 0; left: 16px; right: 16px;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255,179,0,0.3), transparent);
-}
-
-/* ── Raised Panel ── */
-.panel-raised {
-  background: #0E0E16;
-  border: 0.5px solid rgba(255,255,255,0.06);
-  box-shadow: 0 4px 24px rgba(0,0,0,0.5);
-}
-
-/* ═══════════════════════════════════════════════════════════════════
-   Buttons & Interactive
-   ═══════════════════════════════════════════════════════════════════ */
-
-.btn-studio {
-  position: relative;
-  overflow: hidden;
-  transition: all 0.2s ease;
-}
-.btn-studio::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(180deg, rgba(255,255,255,0.06) 0%, transparent 50%);
-  pointer-events: none;
-}
-.btn-studio:hover {
-  transform: translateY(-1px);
-}
-.btn-studio:active {
-  transform: translateY(0);
-}
-
-/* ── Neon Primary Button ── */
-.btn-neon {
-  background: #FFB300;
-  color: #050508;
-  font-weight: 600;
-  box-shadow: 0 0 20px rgba(255,179,0,0.15);
-  transition: all 0.2s ease;
-}
-.btn-neon:hover {
-  background: #FFC233;
-  box-shadow: 0 0 30px rgba(255,179,0,0.25), 0 0 60px rgba(255,179,0,0.08);
-}
-
-/* ═══════════════════════════════════════════════════════════════════
-   Animations
-   ═══════════════════════════════════════════════════════════════════ */
-
-@keyframes fade-in-up {
-  from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-@keyframes fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-@keyframes reveal-right {
-  from { clip-path: inset(0 100% 0 0); }
-  to { clip-path: inset(0 0 0 0); }
-}
-@keyframes pulse-neon {
-  0%, 100% { box-shadow: 0 0 4px rgba(255,179,0,0.2); }
-  50% { box-shadow: 0 0 16px rgba(255,179,0,0.4); }
-}
-@keyframes timeline-wipe {
-  from { transform: scaleX(0); transform-origin: left; }
-  to { transform: scaleX(1); transform-origin: left; }
-}
-@keyframes meter-fill {
-  from { width: 0%; }
-  to { width: var(--meter-width); }
-}
-
-/* ── Staggered Entry ── */
-.stagger-1 { animation: fade-in-up 0.5s ease-out 0.05s both; }
-.stagger-2 { animation: fade-in-up 0.5s ease-out 0.12s both; }
-.stagger-3 { animation: fade-in-up 0.5s ease-out 0.19s both; }
-.stagger-4 { animation: fade-in-up 0.5s ease-out 0.26s both; }
-.stagger-5 { animation: fade-in-up 0.5s ease-out 0.33s both; }
-
-.animate-in { animation: fade-in-up 0.5s ease-out both; }
-.animate-in-delay-1 { animation-delay: 0.1s; }
-.animate-in-delay-2 { animation-delay: 0.2s; }
-
-/* ── Timeline Wipe for result segments ── */
-.timeline-wipe {
-  animation: timeline-wipe 0.6s ease-out forwards;
-}
-
-/* ═══════════════════════════════════════════════════════════════════
-   Forms
-   ═══════════════════════════════════════════════════════════════════ */
-
-input, select, textarea {
-  font-family: inherit;
-}
-input:focus, select:focus, textarea:focus {
-  border-color: rgba(255,179,0,0.4) !important;
-  box-shadow: 0 0 0 3px rgba(255,179,0,0.08);
-  outline: none;
-}
-
-/* ═══════════════════════════════════════════════════════════════════
-   Scrollbar — Studio Dark
-   ═══════════════════════════════════════════════════════════════════ */
-
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: #08080D; }
-::-webkit-scrollbar-thumb {
-  background: #1A1A24;
-  border-radius: 999px;
-}
-::-webkit-scrollbar-thumb:hover { background: #2A2A36; }
-
-/* ═══════════════════════════════════════════════════════════════════
-   Selection & Focus
-   ═══════════════════════════════════════════════════════════════════ */
-
-::selection {
-  background: rgba(255,179,0,0.2);
-  color: #FFE8B0;
-}
-:focus-visible {
-  outline: 1.5px solid #FFB300;
-  outline-offset: 2px;
-  border-radius: 3px;
-}
-
-/* ═══════════════════════════════════════════════════════════════════
-   Utility
-   ═══════════════════════════════════════════════════════════════════ */
-
-button, input, select, textarea { font: inherit; }
-button { cursor: pointer; }
-button:disabled { cursor: not-allowed; opacity: 0.4; }
-
-.gradient-divider {
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255,179,0,0.2) 30%, rgba(255,179,0,0.3) 50%, rgba(255,179,0,0.2) 70%, transparent);
-}
-
-.metric-glow {
-  text-shadow: 0 0 20px rgba(255,179,0,0.2);
-}
-
-.pulse-ring {
-  animation: pulse-neon 2s ease-in-out infinite;
-}
-
-/* ── Studio Color Bars (timeline reference) ── */
-.color-bars {
-  height: 2px;
-  background: linear-gradient(90deg,
-    #FFB300 0%, #FFB300 16.6%,
-    #00E676 16.6%, #00E676 33.3%,
-    #FFB300 33.3%, #FFB300 50%,
-    #FF5252 50%, #FF5252 66.6%,
-    #448AFF 66.6%, #448AFF 83.3%,
-    #FFB300 83.3%, #FFB300 100%
-  );
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    scroll-behavior: auto !important;
-    transition-duration: 0.01ms !important;
-  }
 }

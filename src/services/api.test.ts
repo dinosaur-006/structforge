@@ -107,11 +107,9 @@ describe('api client', () => {
     const script = { version: 'high_click', total_duration: 35, segments: [], metadata: { warnings: [] } };
     vi.mocked(fetch)
       .mockResolvedValueOnce(new Response(JSON.stringify(script), { status: 200, headers: { 'Content-Type': 'application/json' } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ...script, version: 'high_quality' }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(JSON.stringify(script), { status: 200, headers: { 'Content-Type': 'application/json' } }));
 
     await api.migrateScript('proj-1', 'high_click');
-    await api.migrateVariant('proj-1', 'high_quality');
     await api.getFinalScript('proj-1');
 
     expect(fetch).toHaveBeenNthCalledWith(
@@ -119,12 +117,7 @@ describe('api client', () => {
       'http://127.0.0.1:8000/api/v1/migrate/proj-1',
       expect.objectContaining({ method: 'POST', body: JSON.stringify({ style: 'high_click' }) }),
     );
-    expect(fetch).toHaveBeenNthCalledWith(
-      2,
-      'http://127.0.0.1:8000/api/v1/migrate/proj-1/variant',
-      expect.objectContaining({ method: 'POST', body: JSON.stringify({ style: 'high_quality' }) }),
-    );
-    expect(fetch).toHaveBeenNthCalledWith(3, 'http://127.0.0.1:8000/api/v1/migrate/proj-1', {});
+    expect(fetch).toHaveBeenNthCalledWith(2, 'http://127.0.0.1:8000/api/v1/migrate/proj-1', {});
   });
 
   it('loads rule-evaluated generated versions', async () => {

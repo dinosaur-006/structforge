@@ -25,7 +25,7 @@ export function SegmentBlock({ segment, hasGap, onSelect }: SegmentBlockProps) {
     <button
       ref={setNodeRef}
       type="button"
-      className={cn('relative min-h-32 min-w-0 flex-1 rounded-lg border border-l-2 border-border bg-card p-4 text-left shadow-sm transition-colors hover:border-primary/40', toneClasses[tone])}
+      className={cn('relative min-h-32 min-w-0 flex-1 rounded-xl border border-l-2 border-border bg-card p-4 text-left shadow-sm transition-colors hover:border-primary/40', toneClasses[tone])}
       style={{ transform: CSS.Transform.toString(transform), transition }}
       onClick={() => onSelect(segment.id)}
     >

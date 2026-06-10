@@ -18,8 +18,6 @@ from services.llm_structure import (
 from services.media import detect_scenes, extract_keyframes, probe_video
 from services.reference_assets import bind_reference_video_asset
 from services.vision import analyze_frames
-from services.cover_generator import CoverGenerator
-from services.highlight_detector import HighlightDetector
 from services.structure_cache import StructureCache
 
 
@@ -122,6 +120,19 @@ class AnalysisPipeline:
                 max_attempts=self.settings.llm_max_attempts,
             )
 
+            # ── L2 Rhythm: compute shot_count per segment from scene detection ──
+            if scenes:
+                for seg in structure.script:
+                    seg_start_s = seg.start
+                    seg_end_s = seg.end
+                    shots_in_seg = sum(
+                        1 for s in scenes
+                        if seg_start_s <= s.get("start_s", s.get("start_ms", 0) / 1000) <= seg_end_s
+                    )
+                    if shots_in_seg > 0:
+                        seg.shot_count = shots_in_seg
+                        seg.avg_shot_duration = round(seg.duration / shots_in_seg, 2) if shots_in_seg > 0 else None
+
             # Store ASR + Vision raw data alongside structure for burst audit
             vision_frames_raw = vision_result.get("frames", []) if vision_result else []
             asr_data = asr_result if asr_result else {}
@@ -173,41 +184,6 @@ class AnalysisPipeline:
                     result_with_pool = dict(existing["result"])
                     result_with_pool["shot_pool"] = shot_pool
                     self.repository.update_job(job_id, result=result_with_pool)
-            except Exception:
-                pass
-
-            # Non-blocking: generate cover image and detect highlights after analysis completes.
-            try:
-                cover_gen = CoverGenerator(self.settings)
-                cover_path = cover_gen.generate(structure, keyframe_paths=frames, product_name="")
-                existing = self.repository.get_job(job_id)
-                if existing and existing.get("result"):
-                    result_with_cover = dict(existing["result"])
-                    meta = dict(result_with_cover.get("meta") or {})
-                    meta["coverImagePath"] = str(cover_path)
-                    result_with_cover["meta"] = meta
-                    self.repository.update_job(job_id, result=result_with_cover)
-            except Exception:
-                pass
-
-            try:
-                detector = HighlightDetector(
-                    llm_endpoint=self.settings.doubao_llm_endpoint,
-                    llm_api_key=self.settings.doubao_llm_api_key,
-                    llm_model=self.settings.doubao_llm_model,
-                )
-                highlights = detector.detect(
-                    rhythm_points=[p.model_dump(mode="json") for p in structure.rhythm],
-                    asr_segments=asr_result.get("segments", []),
-                    vision_frames=vision_result.get("frames", []),
-                    duration=float(meta["duration"]),
-                )
-                if highlights:
-                    existing = self.repository.get_job(job_id)
-                    if existing and existing.get("result"):
-                        result_with_hl = dict(existing["result"])
-                        result_with_hl["highlightMoments"] = highlights
-                        self.repository.update_job(job_id, result=result_with_hl)
             except Exception:
                 pass
 

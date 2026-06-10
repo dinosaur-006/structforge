@@ -9,7 +9,7 @@ export interface ErrorAlertProps {
 
 export function ErrorAlert({ title, description, action }: ErrorAlertProps) {
   return (
-    <div className="rounded-lg border border-error/30 bg-card p-5 text-error" role="alert">
+    <div className="rounded-xl border border-error/30 bg-card p-5 text-error" role="alert">
       <div className="flex gap-3">
         <AlertTriangle className="mt-0.5 h-5 w-5 flex-none" />
         <div>

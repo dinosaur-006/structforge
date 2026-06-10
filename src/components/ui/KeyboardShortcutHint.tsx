@@ -13,7 +13,7 @@ export function KeyboardShortcutHint() {
         <Keyboard className="h-4 w-4" />
       </Button>
       <Modal open={open} title="键盘快捷键参考" onClose={() => setOpen(false)}>
-        <div className="space-y-5">
+        <div className="space-y-4">
           {keybindingGroups.map((group) => (
             <div key={group.title}>
               <h3 className="mb-2 text-sm font-semibold text-text-primary">{group.title}</h3>

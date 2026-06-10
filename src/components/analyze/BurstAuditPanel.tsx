@@ -36,9 +36,9 @@ const dimIcons: Record<string, React.ReactNode> = {
 export function BurstAuditPanel({ report }: { report: AuditReport | null }) {
   const [expandedDims, setExpandedDims] = useState<Set<string>>(new Set(['注意力锚点 (Hook)']));
 
-  if (!report) {
+  if (!report || !report.dimensions?.length) {
     return (
-      <div className="flex min-h-[200px] items-center justify-center rounded-lg border border-border bg-card text-sm text-text-muted">
+      <div className="flex min-h-[200px] items-center justify-center rounded-xl border border-border/60 bg-white text-sm text-text-muted">
         暂无审计数据 — 请先完成视频分析
       </div>
     );
@@ -53,33 +53,19 @@ export function BurstAuditPanel({ report }: { report: AuditReport | null }) {
     });
   };
 
-  const overallColor = report.overall_score >= 80 ? '#10B981' : report.overall_score >= 55 ? '#F59E0B' : '#EF4444';
-
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between rounded-lg border border-border bg-card px-5 py-4">
-        <div>
-          <h2 className="font-semibold text-sm">全模态爆款审计报告</h2>
-          <p className="text-xs text-text-muted mt-0.5">32项指标 × 5维度 × 4模态量化分析</p>
-        </div>
-        <div className="text-center">
-          <div className="text-3xl font-bold" style={{ color: overallColor }}>{report.overall_score}</div>
-          <div className="text-[10px] text-text-muted">综合爆款指数</div>
-        </div>
+      <div className="rounded-xl border border-border/60 bg-white px-5 py-4">
+        <h2 className="font-semibold text-sm">视频结构分析报告</h2>
+        <p className="text-xs text-text-muted mt-0.5">基于可验证的视频特征提取，用于辅助脚本创作决策</p>
       </div>
 
-      {/* LLM unavailable banner */}
-      {report.llm_insights && (report.llm_insights as Record<string, unknown>).error && (
-        <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-4 py-2 text-xs text-amber-400/80">
-          LLM 软分析暂时不可用（{(report.llm_insights as Record<string, unknown>).error as string}），
-          当前展示基于 32 项规则量化的硬指标结果。建议稍后重试以获取 AI 改进建议。
-        </div>
-      )}
+      {/* Audit is pure rule-based (instant) — no LLM dependency */}
 
       {/* Suggestions */}
       {report.suggestions.length > 0 && (
-        <div className="rounded-lg border border-primary/20 bg-primary-muted p-4">
+        <div className="rounded-xl border border-primary/20 bg-primary-muted p-4">
           <p className="text-xs font-semibold text-primary mb-2">AI 改进建议</p>
           <div className="space-y-2">
             {report.suggestions.slice(0, 3).map((s, i) => (
@@ -103,7 +89,7 @@ export function BurstAuditPanel({ report }: { report: AuditReport | null }) {
         const dimColor = dim.score >= 80 ? '#10B981' : dim.score >= 50 ? '#F59E0B' : '#EF4444';
 
         return (
-          <div key={dim.name} className="rounded-lg border border-border bg-card overflow-hidden">
+          <div key={dim.name} className="rounded-xl border border-border/60 bg-white overflow-hidden">
             {/* Dimension header */}
             <button
               type="button"
@@ -146,7 +132,7 @@ export function BurstAuditPanel({ report }: { report: AuditReport | null }) {
 
       {/* Template summary */}
       {report.burst_template && Object.keys(report.burst_template).length > 0 && (
-        <div className="rounded-lg border border-border bg-card p-4">
+        <div className="rounded-xl border border-border/60 bg-white p-4">
           <p className="text-xs font-semibold mb-2">爆款创作参数模板</p>
           <div className="grid grid-cols-3 gap-1 text-[10px]">
             {Object.entries(report.burst_template).slice(0, 12).map(([key, val]) => (

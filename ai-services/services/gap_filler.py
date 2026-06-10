@@ -202,12 +202,69 @@ class GapFiller:
         return self.editor.update_segment(project_id, segment.id, {"assetId": asset["id"]})
 
     def _apply_aigc(self, project_id: str, gap: dict[str, Any]) -> VideoStructure:
-        # Use ARK Seedream image API when image key is available.
+        # Strategy priority: ComfyUI Flux > Seedream API > Pillow fallback
+        if getattr(self.settings, 'runninghub_api_key', None):
+            return self._apply_comfyui(project_id, gap)
         if self.settings.doubao_image_api_key:
             return self._apply_seedream(project_id, gap)
-
-        # Fallback: no API key at all.
         return self._apply_aigc_fallback(project_id, gap)
+
+    def _apply_comfyui(self, project_id: str, gap: dict[str, Any]) -> VideoStructure:
+        """Generate AIGC image via ComfyUI RunningHub Flux."""
+        import asyncio as _asyncio
+        import httpx as _httpx
+        from services.comfyui_service import create_comfyui_service
+
+        structure = self.editor.get_structure(project_id)
+        segment = next((item for item in structure.script if item.id == gap["segmentId"]), None)
+        if segment is None:
+            raise GapNotFoundError(f"Gap not found: {gap['id']}")
+
+        prompt = (
+            f"E-commerce vertical short video frame, 9:16 aspect ratio. "
+            f"{segment.visual}. {segment.copy_text}. "
+            f"Professional product photography, cinematic lighting, photorealistic."
+        )
+
+        try:
+            comfyui = create_comfyui_service(self.settings)
+            _loop = _asyncio.new_event_loop()
+            try:
+                _asyncio.set_event_loop(_loop)
+                result = _loop.run_until_complete(comfyui.generate_image(
+                    prompt=prompt, width=1080, height=1920,
+                ))
+            finally:
+                _loop.close()
+            if not result.get("url"):
+                return self._apply_aigc_fallback(project_id, gap)
+
+            asset_dir = self.settings.upload_dir / project_id / "assets"
+            asset_dir.mkdir(parents=True, exist_ok=True)
+            output_path = asset_dir / f"{gap['id']}_comfyui.png"
+            # Download with auth header (RunningHub CDN requires API key)
+            api_key = getattr(self.settings, 'runninghub_api_key', None)
+            headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+            resp = _httpx.get(result["url"], headers=headers, follow_redirects=True, timeout=30)
+            if resp.status_code == 200 and len(resp.content) > 100:
+                output_path.write_bytes(resp.content)
+            else:
+                return self._apply_aigc_fallback(project_id, gap)
+        except Exception:
+            return self._apply_aigc_fallback(project_id, gap)
+
+        tag = _tag_for_segment_type(segment.type)
+        asset = self.repository.create_asset(
+            project_id=project_id,
+            name=f"{segment.label} ComfyUI.png",
+            asset_type="image",
+            file_path=str(output_path),
+            tag=f"{tag} ComfyUI",
+            analysis={"description": f"{segment.label} ComfyUI Flux {tag}", "tags": [tag, "ComfyUI", "AIGC"], "ocr_text": ""},
+            origin="aigc",
+        )
+        self.repository.update_asset_match(asset["id"], score=95.0, status="matched")
+        return self.editor.update_segment(project_id, segment.id, {"assetId": asset["id"]})
 
     def _apply_seedream(self, project_id: str, gap: dict[str, Any]) -> VideoStructure:
         """Generate AIGC image via Doubao Seedream ARK Images API."""

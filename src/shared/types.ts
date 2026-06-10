@@ -37,6 +37,8 @@ export interface VideoMeta {
   resolution: string;
   shots: number;
   coverLabel: string;
+  productName?: string;
+  coverImagePath?: string | null;
 }
 
 export interface ScriptSegment {
@@ -85,6 +87,8 @@ export interface VideoStructure {
   rhythm: RhythmPoint[];
   packaging: PackagingStructure;
   health: HealthScores;
+  highlightMoments?: Array<{ start_s: number; end_s: number; score: number; reason: string }> | null;
+  shot_pool?: Array<Record<string, unknown>> | null;
 }
 
 export interface AnalysisSample {
@@ -107,6 +111,7 @@ export interface Capabilities {
   vision: CapabilityItem;
   asr: CapabilityItem;
   aigc: CapabilityItem;
+  videoGeneration?: CapabilityItem;
   taskExecution: CapabilityItem;
 }
 
@@ -175,6 +180,7 @@ export interface FinalSegment {
   source: SourceType;
   source_start?: number | null;
   source_end?: number | null;
+  visual_requirements?: Record<string, string>;
 }
 
 export interface FinalScript {

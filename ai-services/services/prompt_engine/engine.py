@@ -1,11 +1,4 @@
-"""AIVideoPromptEngine — unified entry point for multi-platform prompt generation.
-
-Usage:
-    engine = AIVideoPromptEngine(platform="seedance")
-    result = engine.generate(segment, product_name="旺仔牛奶", product_type="食品饮料")
-    print(result.prompt_text)   # Ready-to-use Seedance prompt
-    print(result.prompt_english) # Runway-compatible English prompt
-"""
+"""AIVideoPromptEngine — Flux-optimized English prompt generation for RunningHub."""
 
 from __future__ import annotations
 
@@ -13,32 +6,27 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .assembler import PromptAssembler, PromptResult
-from .adapters.seedance import SeedanceAdapter
 from .negative_prompts import select_negatives
 
 
 @dataclass
 class GeneratedPrompt:
-    """Complete prompt output from the engine, ready for API call or user display."""
+    """Complete prompt output for RunningHub ComfyUI Flux + WAN 2.2."""
 
     segment_id: str
     segment_type: str
-    platform: str
+    platform: str = "flux"
 
-    # Primary prompt (platform-native format)
-    prompt_text: str
-
-    # Alternative platform prompts
-    prompt_english: str      # Runway-compatible
-    prompt_chinese: str      # Kling-compatible
+    # Primary prompt (Flux-optimized English)
+    prompt_english: str = ""
 
     # Negative prompt
-    negative_prompt: str
+    negative_prompt: str = ""
 
     # Production parameters
-    camera: str
-    visual_fx: str
-    emotion: str
+    camera: str = ""
+    visual_fx: str = ""
+    emotion: str = ""
     pace: str = "正常"
     subtitle_anim: str = "淡入"
     duration: float = 5.0
@@ -46,7 +34,7 @@ class GeneratedPrompt:
     # API metadata
     aspect_ratio: str = "9:16"
     resolution: str = "720p"
-    model: str = "doubao-seedance-2-0-260128"
+    model: str = "flux"
     api_payload: dict[str, Any] = field(default_factory=dict)
     estimated_tokens: int = 0
     estimated_cost_usd: float = 0.0
@@ -64,16 +52,14 @@ class GeneratedPrompt:
 
 
 class AIVideoPromptEngine:
-    """Unified prompt generation engine supporting multiple platforms.
+    """Flux-optimized English prompt generator for RunningHub ComfyUI.
 
-    Platform-adaptive: generates native-format prompts for Seedance, Runway, and Kling.
-    Quality-gated: optional validation scores each prompt before returning.
+    Generates prompts for both Flux (text-to-image) and WAN 2.2 (image-to-video).
     """
 
-    def __init__(self, platform: str = "seedance") -> None:
+    def __init__(self, platform: str = "flux") -> None:
         self.platform = platform
         self.assembler = PromptAssembler()
-        self.seedance = SeedanceAdapter()
 
     def generate(
         self,
@@ -81,30 +67,18 @@ class AIVideoPromptEngine:
         *,
         product_name: str = "",
         product_type: str = "其他",
-        validate: bool = False,
+        product_visual: dict | None = None,
     ) -> GeneratedPrompt:
-        """Generate a complete prompt from segment data.
-
-        Args:
-            segment: FinalSegment-compatible object
-            product_name: Human-readable product name
-            product_type: Broad product category
-            validate: If True, run quality checks before returning
-
-        Returns:
-            GeneratedPrompt with platform-native + cross-platform prompts
-        """
-        # Assemble structured layers
+        """Generate a complete Flux prompt from segment data."""
         layers = self.assembler.assemble(
             segment=segment,
             product_name=product_name,
             product_type=product_type,
             platform=self.platform,
+            product_visual=product_visual,
         )
 
-        # Platform-specific formatting
         seg_type = str(getattr(segment, "type", "product"))
-        visual = str(getattr(segment, "visual", "") or "")
         camera = str(getattr(segment, "camera", "静态") or "静态")
         visual_fx = str(getattr(segment, "visual_fx", "无") or "无")
         emotion = str(getattr(segment, "emotion", "亲切") or "亲切")
@@ -114,24 +88,8 @@ class AIVideoPromptEngine:
         script = str(getattr(segment, "script", "") or "")
         seg_id = str(getattr(segment, "id", ""))
 
-        # Primary prompt (Seedance format)
-        prompt_text = self.seedance.build_prompt(
-            segment_type=seg_type,
-            product_name=product_name,
-            product_type=product_type,
-            visual_description=visual,
-            script_text=script,
-            camera=camera,
-            visual_fx=visual_fx,
-            emotion=emotion,
-            duration=duration,
-        )
-
-        # English prompt (Runway-compatible)
+        # Flux English prompt
         prompt_english = self._build_english_prompt(layers)
-
-        # Chinese prompt (Kling-compatible)
-        prompt_chinese = self._build_chinese_prompt(layers, emotion)
 
         # Negative prompt
         negative = select_negatives(
@@ -141,37 +99,11 @@ class AIVideoPromptEngine:
             include_product=True,
         )
 
-        # Cost estimation
-        fps = 30
-        frame_coeff = 0.8
-        est_tokens = int(duration * fps * frame_coeff)
-        est_cost = round(duration * fps * frame_coeff * 0.0003, 3)
-        if est_cost < 0.01:
-            est_cost = 0.01
-
-        # API payload
-        payload = {
-            "model": "doubao-seedance-2-0-260128",
-            "content": [{"type": "text", "text": prompt_text}],
-            "duration": max(4, min(int(duration), 12)),
-            "ratio": "9:16",
-            "resolution": "720p",
-            "watermark": False,
-        }
-
-        # Quality validation (if requested)
-        quality_score = 0
-        quality_passed = True
-        if validate:
-            quality_score, quality_passed = self._validate(prompt_text)
-
         return GeneratedPrompt(
             segment_id=seg_id,
             segment_type=seg_type,
             platform=self.platform,
-            prompt_text=prompt_text,
             prompt_english=prompt_english,
-            prompt_chinese=prompt_chinese,
             negative_prompt=negative,
             camera=camera,
             visual_fx=visual_fx,
@@ -179,13 +111,8 @@ class AIVideoPromptEngine:
             pace=pace,
             subtitle_anim=subtitle_anim,
             duration=duration,
-            api_payload=payload,
-            estimated_tokens=est_tokens,
-            estimated_cost_usd=est_cost,
             subtitle_text=script,
             product_name=product_name,
-            quality_score=quality_score,
-            quality_passed=quality_passed,
             layers=layers,
         )
 
@@ -195,52 +122,78 @@ class AIVideoPromptEngine:
         *,
         product_name: str = "",
         product_type: str = "其他",
+        product_visual: dict | None = None,
     ) -> list[GeneratedPrompt]:
-        """Generate prompts for all segments at once."""
+        """Generate Flux prompts for multiple segments at once."""
         return [
-            self.generate(s, product_name=product_name, product_type=product_type)
-            for s in segments
+            self.generate(seg, product_name=product_name, product_type=product_type, product_visual=product_visual)
+            for seg in segments
         ]
 
-    # ── Cross-platform prompt builders ──
+    # ── Prompt builder ──
 
     def _build_english_prompt(self, layers: PromptResult) -> str:
-        """Build a Runway-compatible English prompt from structured layers."""
+        """Build a Flux-optimized English prompt from ALL structured layers."""
         camera_en = {
-            "快推": "Fast dolly-in",
-            "缓推": "Slow dolly-in",
-            "拉远": "Slow dolly-out",
-            "横移": "Slow pan right",
-            "跟随": "Smooth gimbal tracking",
-            "手持微晃": "Handheld phone camera",
-            "静态": "Static locked-off tripod",
-            "环绕": "Slow orbit around subject",
+            "快推": "fast dolly-in, dynamic zoom, high energy approach",
+            "缓推": "slow cinematic push-in, smooth elegant tracking, gradual reveal",
+            "拉远": "slow pull-back reveal, wide establishing shot, expanding view",
+            "横移": "dolly tracking shot, horizontal sweeping, lateral movement",
+            "跟随": "smooth follow-cam, steady gimbal, fluid tracking motion",
+            "手持微晃": "handheld camera shake, documentary raw style, authentic feel",
+            "静态": "static locked-off tripod, stable composition, hyper-focused",
+            "环绕": "slow orbit around subject, 360 degree product showcase, cinematic arc",
         }
-        cam = camera_en.get(layers.camera_motion, "Slow dolly-in")
+        cam = camera_en.get(layers.camera_motion, "slow cinematic push-in")
+
+        tex = layers.subject_textures
+        texture_desc = ", ".join(tex[:3]) if tex else "clean, professional"
+        subjects_en = _resolve_english_subject(layers.product_type, layers.clean_visual)
+        action_en = _resolve_english_action(layers.segment_type, layers.clean_visual)
+
+        SEGMENT_FRAMING: dict[str, str] = {
+            "hook": f"dramatic attention-grabbing opening, {subjects_en}, bold eye-catching shot, {texture_desc} texture, {action_en}",
+            "pain": f"relatable problem scene, {subjects_en}, before the solution, {texture_desc} look, {action_en}",
+            "product": f"premium hero product shot, {subjects_en}, exquisite detail, {texture_desc} surface, {action_en}",
+            "proof": f"scientific comparison demonstration, {subjects_en}, side by side, verified evidence, {action_en}",
+            "cta": f"compelling call to action, {subjects_en}, limited offer, urgent purchase moment, {action_en}",
+        }
+        scene = SEGMENT_FRAMING.get(layers.segment_type, f"professional product shot, {subjects_en}, {action_en}")
+
+        CATEGORY_KW: dict[str, str] = {
+            "食品饮料": "food photography, delicious gourmet, appetizing culinary presentation",
+            "美妆护肤": "beauty product photography, luxury skincare, elegant cosmetic radiant",
+            "电子3C": "tech product photography, sleek modern gadget, premium electronics",
+            "服饰纺织": "fashion photography, elegant fabric, editorial clothing showcase",
+            "家居厨具": "home product photography, cozy kitchen interior, warm lifestyle",
+        }
+        cat = CATEGORY_KW.get(layers.product_type, "product photography, commercial advertising, e-commerce")
 
         return (
-            f"{cam}: {layers.subject_text}. {layers.action_text}. "
-            f"{layers.lighting}. Product commercial aesthetic, "
-            f"minimal clean background, shallow depth of field. "
-            f"{layers.duration:.0f}-second commercial shot."
+            f"vertical 9:16 composition, {cat}. "
+            f"{scene}. "
+            f"{cam}. "
+            f"{layers.lighting}. "
+            f"commercial photography, photorealistic, 8k resolution, "
+            f"shallow depth of field, professional color grading"
         )
 
-    def _build_chinese_prompt(self, layers: PromptResult, emotion: str) -> str:
-        """Build a Kling-compatible Chinese prompt from structured layers."""
-        atmosphere = {
-            "紧迫": "充满紧迫感的", "惊讶": "令人惊叹的", "兴奋": "充满活力的",
-            "亲切": "温馨治愈的", "权威": "专业严谨的", "感动": "令人感动的",
-            "平静": "宁静舒适的",
-        }.get(emotion, "")
+# ── Module-level helpers ──
 
-        return (
-            f"{atmosphere}产品广告画面。{layers.subject_text}，{layers.action_text}。"
-            f"{layers.shot_size}，{layers.lighting}。整体色调协调悦目。"
-        )
+def _resolve_english_subject(product_type: str, visual_hint: str) -> str:
+    from .vocabulary import resolve_product_vocab
+    vocab = resolve_product_vocab(product_type, visual_hint)
+    subjects = vocab.get("subjects", ["product", "item"])
+    return ", ".join(subjects[:2]) if subjects else "product showcase"
 
-    def _validate(self, prompt_text: str) -> tuple[int, bool]:
-        """Run quality checks via PromptQualityValidator. Returns (score, passed)."""
-        from .validator import PromptQualityValidator
-        validator = PromptQualityValidator()
-        report = validator.validate(prompt_text, platform=self.platform)
-        return report.score, report.passed
+
+def _resolve_english_action(segment_type: str, visual_hint: str) -> str:
+    from .vocabulary import SEGMENT_ACTION_HINTS
+    hints = SEGMENT_ACTION_HINTS.get(segment_type, SEGMENT_ACTION_HINTS.get("product", ["being showcased"]))
+    if visual_hint:
+        hint_words = set(visual_hint.lower())
+        for hint in hints:
+            words = set(hint.lower().split())
+            if len(hint_words & words) >= 1:
+                return hint
+    return hints[0]

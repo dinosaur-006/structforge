@@ -38,6 +38,7 @@ class RenderContext:
     version: str = "original"
     resolution: str = "1080p"
     script_version: str | None = None
+    segment_modes: dict[str, str] | None = None  # {seg_id: "image"|"video"}
 
     # Loaded data
     script: FinalScript | None = None
@@ -55,6 +56,11 @@ class RenderContext:
 
     # Output
     output_path: Path | None = None
+
+    # TTS paths (dict keyed by segment index — avoids Pydantic model attribute issues)
+    tts_paths: dict[int, Path] = field(default_factory=dict)
+    # Track actual visual source per segment (Flux vs Pillow vs Original)
+    visual_sources: dict[int, str] = field(default_factory=dict)
 
     # Diagnostics
     warnings: list[str] = field(default_factory=list)
@@ -82,11 +88,160 @@ class VideoRenderPipeline:
         self.repository = repository
         self.settings = settings
 
+    # ── Helper: generate visual via ComfyUI Flux ──
+
+    def _generate_ai_visual(
+        self, prompt_text: str, subtitle: str, segment: Any, idx: int, ctx: RenderContext,
+        negative_prompt: str = "",
+        force_video: bool = False,
+    ) -> Path:
+        """Generate AI visual.
+
+        Strategy:
+        - ComfyUI RunningHub configured → Flux real AI image (best quality)
+        - ComfyUI NOT configured → Pillow blueprint card (single clear fallback)
+        - Never silently degrades — every path is explicit.
+        """
+        from services.comfyui_service import create_comfyui_service
+        comfyui = create_comfyui_service(self.settings)
+
+        if comfyui.available:
+            # ── Primary: ComfyUI Flux ──
+            import asyncio as _asyncio
+            import httpx as _httpx
+            log.info("[ComfyUI] Generating Flux image for %s", segment.id)
+
+            flux_result = None
+            _loop = _asyncio.new_event_loop()
+            try:
+                _asyncio.set_event_loop(_loop)
+                flux_result = _loop.run_until_complete(
+                    comfyui.generate_image(
+                        prompt=prompt_text[:500] if prompt_text else "product showcase",
+                        width=ctx.width, height=ctx.height,
+                        negative_prompt=negative_prompt or None,
+                    )
+                )
+            except Exception as exc:
+                log.warning("[ComfyUI] Generation failed for %s: %s — falling back to Pillow", segment.id, exc)
+                ctx.warnings.append(f"ComfyUI排队已满，{segment.id} 使用Pillow备用渲染")
+            finally:
+                _loop.close()
+
+            if flux_result and flux_result.get("url"):
+                flux_path = ctx.work_dir / f"segment_{idx:03d}_flux.png"
+                # ── Download with retry + auth headers (RunningHub CDN requires API key) ──
+                api_key = getattr(self.settings, 'runninghub_api_key', None)
+                headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+                download_ok = False
+                last_error = None
+                for attempt in range(3):
+                    try:
+                        resp = _httpx.get(flux_result["url"], headers=headers, follow_redirects=True, timeout=30)
+                        if resp.status_code == 200 and len(resp.content) > 100:
+                            flux_path.write_bytes(resp.content)
+                            download_ok = True
+                            break
+                        else:
+                            last_error = f"HTTP {resp.status_code}, size={len(resp.content)}"
+                    except Exception as exc:
+                        last_error = exc
+                    if attempt < 2:
+                        import time as _time
+                        _time.sleep(1.0 * (attempt + 1))
+                if download_ok:
+                    if force_video:
+                        video_path = self._generate_ai_video(flux_path, prompt_text, segment, idx, ctx)
+                        if video_path:
+                            ctx.visual_sources[idx] = "wan2.2"
+                            return video_path
+                    preview_dir = ctx.output_dir / "flux_previews"
+                    preview_dir.mkdir(parents=True, exist_ok=True)
+                    import shutil as _shutil
+                    preview_path = preview_dir / f"segment_{idx:03d}.png"
+                    _shutil.copy2(str(flux_path), str(preview_path))
+                    ctx.warnings.append(f"ComfyUI Flux: {segment.id}")
+                    log.info("ComfyUI Flux OK: %s (%d bytes)", segment.id, flux_path.stat().st_size)
+                    return flux_path
+        # ── Fallback: Pillow blueprint ──
+        log.info("[Blueprint] Rendering Pillow card for %s", segment.id)
+        from services.blueprint_renderer import render_blueprint_card
+        card_path = ctx.work_dir / f"segment_{idx:03d}_promptcard.png"
+        render_blueprint_card(
+            card_path, segment_type=getattr(segment, 'type', 'hook'),
+            visual_prompt=prompt_text[:300],
+            script_text=subtitle or '',
+            duration=float(getattr(segment, 'duration', 3)),
+            camera=getattr(segment, 'camera', '静态') or '静态',
+            visual_fx=getattr(segment, 'visual_fx', '无') or '无',
+            pace=getattr(segment, 'pace', '正常') or '正常',
+            emotion=getattr(segment, 'emotion', '亲切') or '亲切',
+        )
+        if not card_path.exists() or card_path.stat().st_size < 100:
+            raise CompositorError(f"Pillow blueprint failed for {segment.id} (output missing or empty)")
+        ctx.warnings.append(f"Prompt Card: {segment.id}")
+        return card_path
+
+    def _generate_ai_video(self, image_path: Path, prompt_text: str, segment: Any, idx: int, ctx: RenderContext) -> Path | None:
+        """Generate WAN 2.2 video from a Flux image via RunningHub.
+
+        Returns the video path on success, None if video generation is unavailable or failed.
+        """
+        from services.comfyui_service import create_comfyui_service
+        comfyui = create_comfyui_service(self.settings)
+        if not comfyui.available:
+            return None
+
+        import asyncio as _asyncio
+        import httpx as _httpx
+        video_path = ctx.work_dir / f"segment_{idx:03d}_wan.mp4"
+        seg_dur = float(getattr(segment, 'duration', 3))
+        log.info("[WAN] Generating video for %s (%.1fs)", segment.id, seg_dur)
+
+        _loop = _asyncio.new_event_loop()
+        try:
+            _asyncio.set_event_loop(_loop)
+            video_result = _loop.run_until_complete(
+                comfyui.generate_video(
+                    prompt=prompt_text[:300] if prompt_text else "product showcase video",
+                    image_path=str(image_path),
+                    width=ctx.width, height=ctx.height,
+                    duration=min(seg_dur, 5.0),
+                )
+            )
+        except Exception as exc:
+            log.warning("[WAN] Video generation failed for %s: %s", segment.id, exc)
+            return None
+        finally:
+            _loop.close()
+
+        if not video_result.get("url"):
+            return None
+
+        # Download with auth
+        api_key = getattr(self.settings, 'runninghub_api_key', None)
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        for attempt in range(3):
+            try:
+                resp = _httpx.get(video_result["url"], headers=headers, follow_redirects=True, timeout=120)
+                if resp.status_code == 200 and len(resp.content) > 1000:
+                    video_path.write_bytes(resp.content)
+                    ctx.warnings.append(f"WAN 2.2 Video: {segment.id}")
+                    log.info("WAN 2.2 Video OK: %s (%d bytes)", segment.id, video_path.stat().st_size)
+                    return video_path
+            except Exception as exc:
+                if attempt < 2:
+                    import time as _time
+                    _time.sleep(2.0 * (attempt + 1))
+        log.warning("[WAN] Video download failed for %s", segment.id)
+        return None
+
     # ── Main entry point ──
 
     def run(
         self, *, job_id: str, project_id: str, version: str, resolution: str,
         script_version: str | None = None,
+        segment_modes: dict[str, str] | None = None,
     ) -> RenderContext:
         """Execute the full render pipeline synchronously.
 
@@ -97,11 +252,12 @@ class VideoRenderPipeline:
             job_id=job_id, project_id=project_id,
             version=version, resolution=resolution,
             script_version=script_version,
+            segment_modes=segment_modes or {},
         )
         try:
             self._prepare(ctx)
-            self._process_segments(ctx)
-            self._synthesize_speech(ctx)
+            self._synthesize_all_tts(ctx)    # ← PIXELLE PATTERN: TTS BEFORE video!
+            self._process_segments(ctx)       # Now uses audio-driven durations
             self._apply_overlays(ctx)
             self._assemble_video(ctx)
             self._mix_audio(ctx)
@@ -118,9 +274,27 @@ class VideoRenderPipeline:
     # Step 1: Preparation
     # ═══════════════════════════════════════════════
 
+    def _validate_config(self, ctx: RenderContext) -> list[str]:
+        """Check essential configuration before rendering. Returns list of issues."""
+        issues: list[str] = []
+        if not self.settings.doubao_llm_endpoint or not self.settings.doubao_llm_api_key:
+            issues.append("LLM 未配置 — 脚本生成和结构分析将不可用")
+        if not self.settings.ffmpeg_path or self.settings.ffmpeg_path == "ffmpeg":
+            import shutil as _shutil
+            if not _shutil.which("ffmpeg"):
+                issues.append("FFmpeg 未安装 — 视频合成将失败")
+        # TTS is optional (Edge TTS is free and always available)
+        # ComfyUI is optional (Prompt Card fallback available)
+        return issues
+
     def _prepare(self, ctx: RenderContext) -> None:
         """Load script, validate, create work directory."""
         from services.compositor import _validate_restructure_decision
+
+        # ── Config validation ──
+        config_issues = self._validate_config(ctx)
+        if config_issues:
+            ctx.warnings.extend(config_issues)
 
         self.repository.update_render_job(ctx.job_id, status="processing", progress=5)
 
@@ -136,7 +310,17 @@ class VideoRenderPipeline:
         _validate_restructure_decision(ctx.script)
 
         ctx.assets = {a["id"]: a for a in self.repository.list_assets(ctx.project_id)}
-        ctx.width, ctx.height = RESOLUTIONS.get(ctx.resolution, RESOLUTIONS["1080p"])
+        # Use original video's resolution for AI generation consistency
+        project = self.repository.get_project(ctx.project_id)
+        video_resolution = "1080x1920"
+        if project:
+            analysis = project.get("analysis_result") or {}
+            video_resolution = str(analysis.get("meta", {}).get("resolution", "1080x1920"))
+        try:
+            w, h = video_resolution.split("x")
+            ctx.width, ctx.height = int(w), int(h)
+        except (ValueError, TypeError):
+            ctx.width, ctx.height = RESOLUTIONS.get(ctx.resolution, (1080, 1920))
         ctx.work_dir = self.settings.output_dir / ctx.project_id / f".work-{ctx.job_id}"
         ctx.output_dir = self.settings.output_dir / ctx.project_id
         ctx.work_dir.mkdir(parents=True, exist_ok=True)
@@ -162,16 +346,18 @@ class VideoRenderPipeline:
             _get_card_title,
         )
         from services.gap_filler import render_packaging_card
-        from services.ai_video_service import AIVideoService, PromptCard, GeneratedVideo
         from services.blueprint_renderer import render_blueprint_card
-        from services.frame_renderer import _render_prompt_card_html as _html_card
+        from services.flux_prompt_generator import FluxPromptGenerator
+        from services.prompt_engine.negative_prompts import select_negatives
 
         total = len(ctx.segments)
         for idx, segment in enumerate(ctx.segments):
+            seg_mode = (ctx.segment_modes or {}).get(segment.id, "image")
+            mode_label = "视频" if seg_mode == "video" else "图片"
             self.repository.update_render_job(
                 ctx.job_id,
                 progress=10 + int((idx / max(total, 1)) * 60),
-                warnings=[f"渲染分镜 {idx + 1}/{total}"],
+                warnings=[f"生成: {segment.type} ({mode_label}) {idx+1}/{total}"],
             )
             seg_path = ctx.work_dir / f"segment_{idx:03d}.mp4"
             ass_path = ctx.work_dir / f"segment_{idx:03d}.ass"
@@ -194,81 +380,73 @@ class VideoRenderPipeline:
                 if segment.asset_id:
                     ctx.warnings.append(f"missing asset {segment.asset_id}")
 
-                if segment.source == "packaging":
-                    card = ctx.work_dir / f"segment_{idx:03d}_packaging.png"
-                    render_packaging_card(card, title=segment.type.upper(),
-                                          body=segment.script, card_type=segment.type,
-                                          font_path=self.settings.packaging_font_path)
-                    command = build_image_command(
-                        ffmpeg_path=self.settings.ffmpeg_path, input_path=card,
-                        output_path=seg_path, ass_path=ass_path,
-                        duration=max(segment.duration, 0.5),
-                        width=ctx.width, height=ctx.height,
-                        version=ctx.version, segment_type=segment.type,
-                        camera=getattr(segment, 'camera', '静态') or '静态',
-                        visual_fx=getattr(segment, 'visual_fx', '无') or '无',
-                        pace=getattr(segment, 'pace', '正常') or '正常',
-                        emotion=getattr(segment, 'emotion', '亲切') or '亲切',
-                        subtitle_anim=getattr(segment, 'subtitle_anim', '淡入') or '淡入',
-                    )
-                    shot_used = True
-                else:
-                    # AI generation / prompt card
-                    prod_name = (ctx.script.metadata or {}).get("productName", "") or ""
-                    prod_type = (ctx.script.metadata or {}).get("productType", "其他") or "其他"
-                    ai_video = AIVideoService(self.settings, platform="seedance")
-                    ai_result = ai_video.generate(segment, product_name=prod_name, product_type=prod_type)
+                # ── ALL no-asset segments: LLM-generated Flux prompt → ComfyUI ──
+                script_meta = ctx.script.metadata or {}
+                prod_name = script_meta.get("productName", "") or ""
+                prod_type = script_meta.get("productType", "其他") or "其他"
+                product_visual = script_meta.get("productVisual") or {}
 
-                    if isinstance(ai_result, PromptCard):
-                        prompt_card_path = ctx.work_dir / f"segment_{idx:03d}_promptcard.png"
-                        try:
-                            html_ok = False
-                            html_path = _html_card(
-                                prompt_text=ai_result.prompt_text[:500],
-                                subtitle_text=ai_result.subtitle_text or _strip_production_params(segment.script or ""),
-                                camera=ai_result.camera, visual_fx=ai_result.visual_fx,
-                                duration=ai_result.duration, emotion=ai_result.emotion,
-                                cost=ai_result.estimated_cost_usd,
-                            )
-                            if html_path:
-                                prompt_card_path = Path(html_path)
-                                html_ok = True
-                            else:
-                                render_blueprint_card(
-                                    prompt_card_path, segment_type=segment.type,
-                                    visual_prompt=ai_result.prompt_text[:300],
-                                    script_text=ai_result.subtitle_text or _strip_production_params(segment.script or ""),
-                                    duration=ai_result.duration,
-                                    camera=ai_result.camera, visual_fx=ai_result.visual_fx,
-                                    pace=ai_result.pace, emotion=ai_result.emotion,
-                                )
-                                html_ok = True
+                prompt_gen = FluxPromptGenerator(self.settings)
+                flux_prompt = prompt_gen.generate(
+                    segment_type=segment.type,
+                    script=segment.script or "",
+                    visual=getattr(segment, 'visual', '') or "",
+                    camera=getattr(segment, 'camera', '静态') or '静态',
+                    emotion=getattr(segment, 'emotion', '亲切') or '亲切',
+                    duration=float(getattr(segment, 'duration', 3)),
+                    product_name=prod_name,
+                    product_type=prod_type,
+                    product_vision_tags=product_visual.get("tags") if isinstance(product_visual, dict) else None,
+                    product_vision_colors=product_visual.get("colors") if isinstance(product_visual, dict) else None,
+                    width=ctx.width, height=ctx.height,
+                )
+                neg_prompt = select_negatives("flux", segment_type=segment.type, include_product=True)
 
-                            if html_ok:
-                                command = build_image_command(
-                                    ffmpeg_path=self.settings.ffmpeg_path,
-                                    input_path=prompt_card_path, output_path=seg_path,
-                                    ass_path=ass_path, duration=max(segment.duration, 0.5),
-                                    width=ctx.width, height=ctx.height,
-                                    version=ctx.version, segment_type=segment.type,
-                                    camera=getattr(segment, 'camera', '静态') or '静态',
-                                    visual_fx=getattr(segment, 'visual_fx', '无') or '无',
-                                    pace=getattr(segment, 'pace', '正常') or '正常',
-                                    emotion=getattr(segment, 'emotion', '亲切') or '亲切',
-                                    subtitle_anim=getattr(segment, 'subtitle_anim', '淡入') or '淡入',
-                                )
-                                ctx.warnings.append(f"AI prompt card for {segment.id}")
-                                shot_used = True
-                        except Exception:
-                            pass
+                # Check if user wants video for this segment
+                seg_mode = (ctx.segment_modes or {}).get(segment.id, "image")
+                if seg_mode == "video":
+                    ctx.warnings.append(f"Video mode: {segment.id}")
 
-                    if not shot_used:
-                        command = build_placeholder_command(
-                            ffmpeg_path=self.settings.ffmpeg_path, output_path=seg_path,
+                visual_input = self._generate_ai_visual(
+                    prompt_text=flux_prompt,
+                    subtitle=_strip_production_params(segment.script or ""),
+                    segment=segment, idx=idx, ctx=ctx,
+                    negative_prompt=neg_prompt,
+                    force_video=(seg_mode == "video"),
+                )
+                if visual_input and visual_input.exists() and visual_input.stat().st_size > 100:
+                    is_video = visual_input.suffix in ('.mp4', '.webm', '.mov')
+                    if is_video:
+                        # WAN 2.2 video — normalize to consistent format for concat
+                        import shutil as _shutil
+                        temp_video = ctx.work_dir / f"segment_{idx:03d}_temp.mp4"
+                        _shutil.copy2(str(visual_input), str(temp_video))
+                        command = build_video_command(
+                            ffmpeg_path=self.settings.ffmpeg_path,
+                            input_path=temp_video, output_path=seg_path,
                             ass_path=ass_path, duration=max(segment.duration, 0.5),
                             width=ctx.width, height=ctx.height,
                             version=ctx.version, segment_type=segment.type,
+                            has_audio=False, start_seconds=0.0,
+                            emotion=getattr(segment, 'emotion', '亲切') or '亲切',
+                            subtitle_anim=getattr(segment, 'subtitle_anim', '淡入') or '淡入',
                         )
+                    else:
+                        command = build_image_command(
+                            ffmpeg_path=self.settings.ffmpeg_path,
+                            input_path=visual_input, output_path=seg_path,
+                            ass_path=ass_path, duration=max(segment.duration, 0.5),
+                            width=ctx.width, height=ctx.height,
+                            version=ctx.version, segment_type=segment.type,
+                            camera=getattr(segment, 'camera', '静态') or '静态',
+                            visual_fx=getattr(segment, 'visual_fx', '无') or '无',
+                            pace=getattr(segment, 'pace', '正常') or '正常',
+                            emotion=getattr(segment, 'emotion', '亲切') or '亲切',
+                            subtitle_anim=getattr(segment, 'subtitle_anim', '淡入') or '淡入',
+                        )
+                    shot_used = True
+                    is_flux = 'flux' in str(visual_input).lower()
+                    ctx.warnings.append(f"{'ComfyUI Flux' if is_flux else 'Prompt Card'}: {segment.id}")
 
             # ── Branch: Image asset ──
             elif asset["type"] == "image":
@@ -294,35 +472,56 @@ class VideoRenderPipeline:
 
                 # aigc/packaging segments skip reference video → prompt card
                 seg_source = getattr(segment, 'source', 'original') or 'original'
-                if is_reference and seg_source in ("aigc", "packaging", "aigc_draft"):
-                    prod_name = (ctx.script.metadata or {}).get("productName", "") or ""
-                    prod_type = (ctx.script.metadata or {}).get("productType", "其他") or "其他"
-                    ai_video = AIVideoService(self.settings, platform="seedance")
-                    ai_result = ai_video.generate(segment, product_name=prod_name, product_type=prod_type)
-                    if isinstance(ai_result, PromptCard):
-                        prompt_card_path = ctx.work_dir / f"segment_{idx:03d}_promptcard.png"
-                        try:
-                            html_path = _html_card(
-                                prompt_text=ai_result.prompt_text[:500],
-                                subtitle_text=ai_result.subtitle_text or _strip_production_params(segment.script or ""),
-                                camera=ai_result.camera, visual_fx=ai_result.visual_fx,
-                                duration=ai_result.duration, emotion=ai_result.emotion,
-                                cost=ai_result.estimated_cost_usd,
+                if is_reference and seg_source != "reorder":
+                    script_meta2 = ctx.script.metadata or {}
+                    prod_name = script_meta2.get("productName", "") or ""
+                    prod_type = script_meta2.get("productType", "其他") or "其他"
+                    product_visual2 = script_meta2.get("productVisual") or {}
+
+                    prompt_gen2 = FluxPromptGenerator(self.settings)
+                    flux_prompt = prompt_gen2.generate(
+                        segment_type=segment.type,
+                        script=segment.script or "",
+                        visual=getattr(segment, 'visual', '') or "",
+                        camera=getattr(segment, 'camera', '静态') or '静态',
+                        emotion=getattr(segment, 'emotion', '亲切') or '亲切',
+                        duration=float(getattr(segment, 'duration', 3)),
+                        product_name=prod_name,
+                        product_type=prod_type,
+                        product_vision_tags=product_visual2.get("tags") if isinstance(product_visual2, dict) else None,
+                        product_vision_colors=product_visual2.get("colors") if isinstance(product_visual2, dict) else None,
+                        width=ctx.width, height=ctx.height,
+                    )
+                    neg_prompt2 = select_negatives("flux", segment_type=segment.type, include_product=True)
+                    seg_mode2 = (ctx.segment_modes or {}).get(segment.id, "image")
+
+                    visual_input = self._generate_ai_visual(
+                        prompt_text=flux_prompt,
+                        subtitle=_strip_production_params(segment.script or ""),
+                        negative_prompt=neg_prompt2,
+                        segment=segment, idx=idx, ctx=ctx,
+                        force_video=(seg_mode2 == "video"),
+                    )
+                    if visual_input and visual_input.exists():
+                        is_video2 = visual_input.suffix in ('.mp4', '.webm', '.mov')
+                        if is_video2:
+                            import shutil as _shutil2
+                            temp = ctx.work_dir / f"segment_{idx:03d}_temp2.mp4"
+                            _shutil2.copy2(str(visual_input), str(temp))
+                            command = build_video_command(
+                                ffmpeg_path=self.settings.ffmpeg_path,
+                                input_path=temp, output_path=seg_path,
+                                ass_path=ass_path, duration=max(segment.duration, 0.5),
+                                width=ctx.width, height=ctx.height,
+                                version=ctx.version, segment_type=segment.type,
+                                has_audio=False, start_seconds=0.0,
+                                emotion=getattr(segment, 'emotion', '亲切') or '亲切',
+                                subtitle_anim=getattr(segment, 'subtitle_anim', '淡入') or '淡入',
                             )
-                            if html_path:
-                                prompt_card_path = Path(html_path)
-                            else:
-                                render_blueprint_card(
-                                    prompt_card_path, segment_type=segment.type,
-                                    visual_prompt=ai_result.prompt_text[:300],
-                                    script_text=ai_result.subtitle_text or _strip_production_params(segment.script or ""),
-                                    duration=ai_result.duration,
-                                    camera=ai_result.camera, visual_fx=ai_result.visual_fx,
-                                    pace=ai_result.pace, emotion=ai_result.emotion,
-                                )
+                        else:
                             command = build_image_command(
                                 ffmpeg_path=self.settings.ffmpeg_path,
-                                input_path=prompt_card_path, output_path=seg_path,
+                                input_path=visual_input, output_path=seg_path,
                                 ass_path=ass_path, duration=max(segment.duration, 0.5),
                                 width=ctx.width, height=ctx.height,
                                 version=ctx.version, segment_type=segment.type,
@@ -332,10 +531,8 @@ class VideoRenderPipeline:
                                 emotion=getattr(segment, 'emotion', '亲切') or '亲切',
                                 subtitle_anim=getattr(segment, 'subtitle_anim', '淡入') or '淡入',
                             )
-                            ctx.warnings.append(f"AI prompt card for {segment.id} (aigc, skipped ref video)")
-                            shot_used = True
-                        except Exception:
-                            pass
+                        ctx.warnings.append(f"AI visual: {segment.id} (aigc, skipped ref video)")
+                        shot_used = True
                     if not shot_used:
                         command = build_placeholder_command(
                             ffmpeg_path=self.settings.ffmpeg_path, output_path=seg_path,
@@ -345,6 +542,7 @@ class VideoRenderPipeline:
                         )
                     _run_ffmpeg(command, self.settings.ffmpeg_path)
                     ctx.segment_files.append(seg_path)
+                    ctx.warnings.append(f"✓ {idx}:{segment.type}")
                     continue
 
                 # Normal video handling
@@ -397,18 +595,36 @@ class VideoRenderPipeline:
                     shot_used = True
 
             _run_ffmpeg(command, self.settings.ffmpeg_path)
+
+            # ── Merge pre-generated TTS audio (Pixelle-Video pattern) ──
+            tts_path = ctx.tts_paths.get(idx)
+            if tts_path and Path(str(tts_path)).exists():
+                from services.compositor import _merge_video_audio_smart
+                mixed = ctx.work_dir / f"segment_{idx:03d}_mixed.mp4"
+                _merge_video_audio_smart(
+                    str(seg_path), str(tts_path), str(mixed),
+                    ffmpeg_path=self.settings.ffmpeg_path,
+                )
+                if mixed.exists() and mixed.stat().st_size > 0:
+                    mixed.replace(seg_path)
+
             ctx.segment_files.append(seg_path)
+            ctx.warnings.append(f"✓ {idx}:{segment.type}")
 
     # ═══════════════════════════════════════════════
-    # Step 3: TTS synthesis (per-segment, audio-driven)
+    # Step 2: TTS synthesis (BEFORE video — Pixelle-Video pattern)
     # ═══════════════════════════════════════════════
 
-    def _synthesize_speech(self, ctx: RenderContext) -> None:
-        """Per-segment TTS synthesis. Audio duration drives segment duration."""
+    def _synthesize_all_tts(self, ctx: RenderContext) -> None:
+        """Generate TTS for all segments FIRST. Audio duration drives segment duration.
+
+        This is the key Pixelle-Video architectural decision:
+        TTS audio determines how long each segment is, not the other way around.
+        """
         from services.tts_engine import TTSEngine
-        from services.compositor import _strip_production_params, _probe_duration, _merge_video_audio_smart
+        from services.compositor import _strip_production_params, _probe_duration
 
-        self.repository.update_render_job(ctx.job_id, progress=75, warnings=ctx.warnings)
+        self.repository.update_render_job(ctx.job_id, progress=10, warnings=ctx.warnings)
         tts = TTSEngine(
             endpoint=self.settings.tts_endpoint or None,
             api_key=self.settings.tts_api_key,
@@ -417,18 +633,25 @@ class VideoRenderPipeline:
             inference_mode="local" if not self.settings.tts_api_key else "api",
         )
         if not tts.available:
-            ctx.warnings.append("TTS 未配置")
+            ctx.warnings.append("TTS 未配置 — 视频将仅有背景音乐")
+            # Mark all segments as having no TTS
+            for i in range(len(ctx.segments)):
+                ctx.tts_paths[i] = None
             return
 
         tts_ok = 0
+        total = len(ctx.segments)
         for idx, segment in enumerate(ctx.segments):
+            # Push real-time TTS progress via render job warnings
+            self.repository.update_render_job(
+                ctx.job_id,
+                warnings=[f"TTS 配音: {idx + 1}/{total} ({segment.type})"],
+            )
             seg_text = _strip_production_params(segment.script or "")
             if not seg_text.strip():
-                continue
-            if idx >= len(ctx.segment_files):
+                ctx.tts_paths[idx] = None
                 continue
 
-            seg_path = ctx.segment_files[idx]
             tts_path = ctx.work_dir / f"segment_{idx:03d}_tts.mp3"
             seg_dur = max(segment.duration, 0.5)
 
@@ -436,14 +659,13 @@ class VideoRenderPipeline:
                 tts_ok += 1
                 actual = _probe_duration(tts_path)
                 if actual > 0:
+                    # KEY: use actual TTS duration, not LLM-estimated duration
                     segment.duration = max(actual, 0.5)
-                mixed = ctx.work_dir / f"segment_{idx:03d}_mixed.mp4"
-                _merge_video_audio_smart(str(seg_path), str(tts_path), str(mixed),
-                                          ffmpeg_path=self.settings.ffmpeg_path)
-                if mixed.exists() and mixed.stat().st_size > 0:
-                    mixed.replace(seg_path)
-                    ctx.segment_files[idx] = seg_path
+                ctx.tts_paths[idx] = tts_path
+            else:
+                ctx.tts_paths[idx] = None
 
+        # ── Reflow timeline based on actual audio durations ──
         if tts_ok > 0:
             cursor = 0.0
             for seg in ctx.segments:
@@ -451,9 +673,12 @@ class VideoRenderPipeline:
                 seg.duration = max(seg.duration, 0.5)
                 seg.end = cursor + seg.duration
                 cursor = seg.end
-            ctx.warnings.append(f"TTS: {tts_ok}/{len(ctx.segments)} segments (total={cursor:.1f}s)")
+            ctx.warnings.append(
+                f"TTS: {tts_ok}/{len(ctx.segments)} segments "
+                f"(audio-driven duration, total={cursor:.1f}s)"
+            )
         else:
-            ctx.warnings.append("TTS synthesis failed for all segments")
+            ctx.warnings.append("TTS synthesis failed for all segments — 视频仅有字幕")
 
     # ═══════════════════════════════════════════════
     # Step 4: Animated overlays
@@ -507,6 +732,11 @@ class VideoRenderPipeline:
         """Concat all segment files into final MP4."""
         self.repository.update_render_job(ctx.job_id, progress=80, warnings=ctx.warnings)
         output = ctx.output_dir / f"{ctx.version}.mp4"
+
+        # Validate all segment files exist
+        missing = [sp for sp in ctx.segment_files if not sp.exists() or sp.stat().st_size < 100]
+        if missing:
+            raise CompositorError(f"Missing segment files: {[m.name for m in missing]}")
 
         if len(ctx.segment_files) > 1:
             parts = "".join(f"[{i}:v][{i}:a]" for i in range(len(ctx.segment_files)))
@@ -588,38 +818,42 @@ class VideoRenderPipeline:
 
     def _finalize(self, ctx: RenderContext) -> None:
         """Update render job status, save output path, and run self-audit."""
-        # ── Self-audit: evaluate generated video against original structure ──
+        # ── Self-audit: record objective generation quality data ──
         self_audit = None
         try:
-            from services.burst_metrics import BurstMetricsCalculator
-            shots = [
-                {"start_s": float(s.start), "end_s": float(s.end),
-                 "duration_s": float(s.duration), "type": s.type}
-                for s in ctx.segments
-            ]
-            vision_frames = [
-                {"index": i+1, "tags": getattr(s, "visual_keywords", []) or [],
-                 "ocr": [], "description": getattr(s, "visual", ""), "dominant_colors": []}
-                for i, s in enumerate(ctx.segments)
-            ]
-            calc = BurstMetricsCalculator(
-                shots=shots, asr_text="", asr_segments=[],
-                vision_frames=vision_frames,
-                duration=sum(s.duration for s in ctx.segments),
-                platform="douyin",
-            )
-            dimensions = calc.dimension_reports()
-            overall = sum(d.score for d in dimensions) // max(len(dimensions), 1)
+            # Count ComfyUI Flux vs fallback
+            flux_count = 0
+            fallback_count = 0
+            for idx, s in enumerate(ctx.segments):
+                flux_path = ctx.work_dir / f"segment_{idx:03d}_flux.png"
+                if flux_path.exists():
+                    flux_count += 1
+                else:
+                    fallback_count += 1
+
+            visual_quality = "excellent" if flux_count >= len(ctx.segments) * 0.8 else \
+                            "good" if flux_count >= len(ctx.segments) * 0.5 else \
+                            "basic" if flux_count > 0 else "fallback"
+
             self_audit = {
-                "overall_score": overall,
-                "dimensions": [
-                    {"name": d.name, "score": d.score, "strengths": d.strengths[:2]}
-                    for d in dimensions
-                ],
                 "total_duration": round(sum(s.duration for s in ctx.segments), 1),
                 "segment_count": len(ctx.segments),
+                "visual_generation": {
+                    "method": "ComfyUI Flux" if flux_count > 0 else "Prompt Card",
+                    "quality": visual_quality,
+                    "flux_segments": flux_count,
+                    "fallback_segments": fallback_count,
+                    "per_segment": {str(k): v for k, v in ctx.visual_sources.items()},
+                },
+                "audio_generation": {
+                    "method": "Edge TTS" if any((ctx.work_dir / f"segment_{i:03d}_tts.mp3").exists()
+                                                 for i in range(len(ctx.segments))) else "None",
+                },
             }
-            ctx.warnings.append(f"自审计: 综合分={overall} (5维: {', '.join(f'{d.name}={d.score}' for d in dimensions)})")
+            ctx.warnings.append(
+                f"渲染完成: {'ComfyUI Flux' if flux_count > 0 else 'Prompt Card'}"
+                f" ({flux_count}/{len(ctx.segments)}段)"
+            )
         except Exception:
             pass
 
@@ -644,8 +878,14 @@ class VideoRenderPipeline:
 def _run_ffmpeg(command: list[str], ffmpeg_path: str = "ffmpeg") -> None:
     result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if result.returncode != 0:
-        msg = (result.stderr or result.stdout or "FFmpeg failed").strip()
-        raise CompositorError(msg[-1200:])
+        # Extract the actual error (last non-empty lines, skip build config noise)
+        lines = [l.strip() for l in (result.stderr + '\n' + result.stdout).split('\n') if l.strip()]
+        error_lines = [l for l in lines[-10:] if 'error' in l.lower() or 'invalid' in l.lower() or 'no such file' in l.lower() or 'cannot' in l.lower()]
+        if error_lines:
+            msg = '; '.join(error_lines[-3:])
+        else:
+            msg = '; '.join(lines[-5:]) if lines else 'FFmpeg failed'
+        raise CompositorError(f"FFmpeg error: {msg[:500]}")
 
 
 def _has_audio_stream(input_path: Path, ffprobe_path: str) -> bool:

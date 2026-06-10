@@ -86,7 +86,7 @@ export default function ProjectListPage() {
   };
 
   return (
-    <section className="mx-auto max-w-[1240px] space-y-6">
+    <section className="mx-auto max-w-[1240px] px-5 sm:px-6 lg:px-8 py-8 sm:py-12 lg:py-14 space-y-4">
       <SectionHeader
         title={copy.projectsTitle}
         description={'\u7ba1\u7406\u4f60\u7684\u89c6\u9891\u7ed3\u6784\u8fc1\u79fb\u5de5\u4f5c\u6d41'}
@@ -108,12 +108,12 @@ export default function ProjectListPage() {
           ].map((s) => {
             const Icon = s.icon;
             return (
-              <div key={s.step} className="rounded-lg border border-border-visible bg-card p-4">
+              <div key={s.step} className="rounded-xl border border-border-visible bg-card p-4">
                 <div className="flex items-center gap-2 text-sm text-text-muted">
                   <span className="grid h-6 w-6 place-items-center rounded-full bg-primary-muted text-xs font-bold text-primary">{s.step}</span>
                   <ArrowRight className="h-3 w-3" />
                 </div>
-                <div className="mt-3 grid h-10 w-10 place-items-center rounded-lg bg-primary-muted text-primary">
+                <div className="mt-3 grid h-10 w-10 place-items-center rounded-xl bg-primary-muted text-primary">
                   <Icon className="h-5 w-5" />
                 </div>
                 <h3 className="mt-3 font-semibold text-sm">{s.title}</h3>
@@ -127,7 +127,7 @@ export default function ProjectListPage() {
       {/* Search + filter bar */}
       {projects.length > 0 ? (
         <div className="flex flex-wrap items-center gap-3">
-          <div className="flex flex-1 items-center gap-2 rounded-lg border border-border-visible bg-card px-3 py-2">
+          <div className="flex flex-1 items-center gap-2 rounded-xl border border-border-visible bg-card px-3 py-2">
             <Search className="h-4 w-4 text-text-muted" />
             <input
               value={searchQuery}
@@ -139,7 +139,7 @@ export default function ProjectListPage() {
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="h-10 rounded-lg border border-border-visible bg-card px-3 text-sm outline-none"
+            className="h-10 rounded-xl border border-border-visible bg-card px-3 text-sm outline-none"
           >
             <option value="all">全部状态</option>
             <option value="draft">草稿</option>
@@ -174,15 +174,15 @@ export default function ProjectListPage() {
             return (
               <article
                 key={project.id}
-                className="group cursor-pointer rounded-lg border border-border-visible bg-card p-4 shadow-sm transition-all duration-300 hover:border-primary/30 hover:bg-card-hover hover:shadow-raised card-accent"
+                className="group cursor-pointer rounded-xl border border-border-visible bg-card p-4 shadow-sm transition-all duration-300 hover:border-primary/30 hover:bg-card-hover hover:shadow-raised card-accent"
                 onClick={() => navigate(projectDestination(project))}
               >
-                <div className="relative mb-4 grid aspect-video place-items-center overflow-hidden rounded-lg border border-border bg-sidebar">
+                <div className="relative mb-4 grid aspect-video place-items-center overflow-hidden rounded-xl border border-border bg-sidebar">
                   <Video className="h-10 w-10 text-primary" />
                   <button
                     type="button"
                     aria-label={labels.delete}
-                    className="absolute right-2 top-2 grid h-9 w-9 place-items-center rounded-lg border border-border bg-card text-text-secondary opacity-0 shadow-sm transition hover:text-error group-hover:opacity-100"
+                    className="absolute right-2 top-2 grid h-9 w-9 place-items-center rounded-xl border border-border/60 bg-white text-text-secondary opacity-0 shadow-sm transition hover:text-error group-hover:opacity-100"
                     onClick={(event) => {
                       event.stopPropagation();
                       void removeProject(project.id);
@@ -229,7 +229,7 @@ export default function ProjectListPage() {
             <input
               value={name}
               onChange={(event) => setName(event.target.value)}
-              className="mt-2 h-11 w-full rounded-lg border border-border bg-card px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/30"
+              className="mt-2 h-11 w-full rounded-xl border border-border/60 bg-white px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/30"
               autoFocus
             />
           </label>
@@ -238,7 +238,7 @@ export default function ProjectListPage() {
             <textarea
               value={description}
               onChange={(event) => setDescription(event.target.value)}
-              className="mt-2 min-h-24 w-full resize-none rounded-lg border border-border bg-card px-3 py-2 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/30"
+              className="mt-2 min-h-24 w-full resize-none rounded-xl border border-border/60 bg-white px-3 py-2 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/30"
             />
           </label>
           <p className="border-t border-border pt-4 text-xs font-semibold uppercase text-text-secondary">{'\u521b\u4f5c\u7b80\u62a5'}</p>
@@ -274,7 +274,7 @@ function BriefInput({ label, value, onChange }: { label: string; value: string; 
       <input
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="mt-2 h-11 w-full rounded-lg border border-border bg-card px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/30"
+        className="mt-2 h-11 w-full rounded-xl border border-border/60 bg-white px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/30"
       />
     </label>
   );
@@ -288,7 +288,7 @@ function BriefTextArea({ label, value, onChange, placeholder }: { label: string;
         value={value}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
-        className="mt-2 min-h-20 w-full resize-none rounded-lg border border-border bg-card px-3 py-2 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/30"
+        className="mt-2 min-h-20 w-full resize-none rounded-xl border border-border/60 bg-white px-3 py-2 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/30"
       />
     </label>
   );

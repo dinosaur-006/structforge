@@ -13,7 +13,7 @@ export interface TabsProps<T extends string> {
 
 export function Tabs<T extends string>({ items, value, onChange }: TabsProps<T>) {
   return (
-    <div className="flex flex-wrap gap-1 rounded-lg border border-border bg-sidebar p-1">
+    <div className="flex flex-wrap gap-1 rounded-xl border border-border bg-sidebar p-1">
       {items.map((item) => (
         <button
           key={item.id}

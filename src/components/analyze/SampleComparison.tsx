@@ -13,7 +13,7 @@ export function SampleComparison({ samples, onSelect }: SampleComparisonProps) {
   if (!completed.length) return null;
 
   return (
-    <section className="rounded-lg border border-border bg-card p-4 shadow-sm">
+    <section className="rounded-xl border border-border bg-card p-4 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-text-primary">结构对比</h2>
@@ -26,7 +26,7 @@ export function SampleComparison({ samples, onSelect }: SampleComparisonProps) {
           const structure = sample.result!;
           const product = structure.script.find((segment) => segment.type === 'product');
           return (
-            <article key={sample.job_id} className="rounded-lg border border-border bg-surface p-4">
+            <article key={sample.job_id} className="rounded-xl border border-border bg-surface p-4">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-semibold">样例 {index + 1}</span>
                 {sample.isReference ? (

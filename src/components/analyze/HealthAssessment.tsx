@@ -22,7 +22,7 @@ export function HealthAssessment({ scores }: { scores: HealthScores }) {
         <span className="text-text-muted">\u57fa\u4e8e\u5927\u6a21\u578b\u5bf9\u89c6\u9891\u60c5\u7eea\u3001\u8282\u594f\u3001\u5b8c\u64ad\u6f5c\u529b\u7684\u4e3b\u89c2\u5224\u65ad</span>
       </div>
       <div className="grid gap-4 xl:grid-cols-[420px,1fr]">
-        <div className="min-h-[320px] rounded-lg border border-border bg-card p-4 shadow-sm">
+        <div className="min-h-[320px] rounded-xl border border-border bg-card p-4 shadow-sm">
           <ResponsiveContainer width="100%" height={320}>
             <RadarChart data={data}>
               <PolarGrid stroke="#E7E5E0" />
@@ -33,7 +33,7 @@ export function HealthAssessment({ scores }: { scores: HealthScores }) {
         </div>
         <div className="grid gap-3">
           {data.map((item) => (
-            <div key={item.metric} className="flex items-center justify-between rounded-lg border border-border bg-card p-4 shadow-sm">
+            <div key={item.metric} className="flex items-center justify-between rounded-xl border border-border bg-card p-4 shadow-sm">
               <div>
                 <p className="font-semibold">{item.metric}</p>
                 <p className="text-sm text-text-secondary">AI \u76f4\u89c9\u8bc4\u5206</p>

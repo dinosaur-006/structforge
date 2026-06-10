@@ -18,7 +18,7 @@ export function RhythmStructure({ data }: { data: RhythmPoint[] }) {
   const stats = rhythmStats(data);
   return (
     <div className="grid gap-4 xl:grid-cols-[1fr,260px]">
-      <div className="min-h-[280px] rounded-lg border border-border bg-card p-4 shadow-sm">
+      <div className="min-h-[280px] rounded-xl border border-border bg-card p-4 shadow-sm">
         <ResponsiveContainer width="100%" height={280}>
           <AreaChart data={data}>
             <defs>
@@ -41,7 +41,7 @@ export function RhythmStructure({ data }: { data: RhythmPoint[] }) {
           ['\u9ad8\u6f6e\u4f4d\u7f6e', stats.peakPos],
           ['\u60c5\u7eea\u5cf0\u503c', stats.peakEmotion],
         ].map(([label, value]) => (
-          <div key={label} className="rounded-lg border border-border bg-card p-4 shadow-sm">
+          <div key={label} className="rounded-xl border border-border bg-card p-4 shadow-sm">
             <p className="text-sm text-text-secondary">{label}</p>
             <p className="mt-2 font-mono text-2xl font-semibold text-primary">{value}</p>
           </div>
