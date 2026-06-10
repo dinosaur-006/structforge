@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  width:1080px; height:1920px;
+  background: linear-gradient(135deg, #0A0A10 0%, #141428 100%);
+  font-family: 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK', sans-serif;
+  color: #E8E8ED;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Grid background */
+.grid-bg {
+  position:absolute; top:0; left:0; width:100%; height:100%;
+  background-image:
+    linear-gradient(rgba(40,40,60,0.3) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(40,40,60,0.3) 1px, transparent 1px);
+  background-size: 60px 60px;
+  opacity: 0.5;
+}
+
+/* Corner markers */
+.corner { position:absolute; width:40px; height:40px; border-color: rgba(90,90,120,0.5); }
+.corner-tl { top:80px; left:80px; border-top:2px solid; border-left:2px solid; }
+.corner-tr { top:80px; right:80px; border-top:2px solid; border-right:2px solid; }
+.corner-bl { bottom:80px; left:80px; border-bottom:2px solid; border-left:2px solid; }
+.corner-br { bottom:80px; right:80px; border-bottom:2px solid; border-right:2px solid; }
+
+/* Top bar */
+.top-bar {
+  position:absolute; top:0; left:0; right:0; height:4px;
+  background: linear-gradient(90deg, #FFB300, #00E676);
+}
+
+/* DRAFT badge */
+.draft-badge {
+  position:absolute; top:40px; right:80px;
+  padding:8px 20px; border-radius:12px;
+  background: rgba(255,179,0,0.1); border:1px solid rgba(255,179,0,0.3);
+  font-size:24px; color:#FFB300; font-weight:bold;
+  animation: pulse 2s infinite;
+}
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
+
+/* Main content area */
+.content {
+  position:absolute; top:280px; left:80px; right:80px;
+  display:flex; flex-direction:column; gap:60px;
+}
+
+/* Prompt text */
+.prompt-label {
+  font-size:28px; color:#5A5A72; letter-spacing:2px; text-transform:uppercase;
+}
+.prompt-text {
+  font-size:46px; line-height:1.7; color:#00E676;
+  background: rgba(0,230,118,0.05); border:1px solid rgba(0,230,118,0.15);
+  border-radius:16px; padding:50px 60px;
+  word-break: break-word;
+}
+
+/* Camera info */
+.specs {
+  display:grid; grid-template-columns:1fr 1fr; gap:30px; margin-top:40px;
+}
+.spec-card {
+  background: rgba(20,20,40,0.8); border:1px solid rgba(40,40,60,0.6);
+  border-radius:12px; padding:30px 40px;
+}
+.spec-label { font-size:22px; color:#5A5A72; }
+.spec-value { font-size:32px; color:#E8E8ED; margin-top:8px; font-weight:bold; }
+
+/* Bottom bar */
+.bottom-bar {
+  position:absolute; bottom:120px; left:80px; right:80px;
+}
+.duration-bar {
+  height:6px; background:rgba(40,40,60,0.5); border-radius:3px; overflow:hidden;
+}
+.duration-fill {
+  height:100%; width:35%; background:linear-gradient(90deg,#FFB300,#00E676); border-radius:3px;
+}
+.duration-text {
+  font-size:24px; color:#5A5A72; margin-top:12px;
+}
+
+/* Footer */
+.footer {
+  position:absolute; bottom:40px; left:80px; right:80px;
+  text-align:center; font-size:20px; color:rgba(90,90,114,0.5);
+}
+
+/* Subtitle text */
+.subtitle-area {
+  font-size:34px; color:#CDD6F4; text-align:center;
+  padding:20px 40px; margin-top:20px;
+  border-top:1px solid rgba(40,40,60,0.3);
+}
+</style>
+</head>
+<body>
+<div class="grid-bg"></div>
+<div class="corner corner-tl"></div>
+<div class="corner corner-tr"></div>
+<div class="corner corner-bl"></div>
+<div class="corner corner-br"></div>
+<div class="top-bar"></div>
+
+<div class="draft-badge">&#9670; AI 生成预留位 / DRAFT</div>
+
+<div class="content">
+  <div>
+    <div class="prompt-label">VISUAL PROMPT / 文生视频提示词</div>
+    <div class="prompt-text">{{prompt_text}}</div>
+  </div>
+
+  <div class="specs">
+    <div class="spec-card">
+      <div class="spec-label">CAMERA / 运镜</div>
+      <div class="spec-value">{{camera}}</div>
+    </div>
+    <div class="spec-card">
+      <div class="spec-label">VISUAL FX / 特效</div>
+      <div class="spec-value">{{visual_fx}}</div>
+    </div>
+    <div class="spec-card">
+      <div class="spec-label">DURATION / 时长</div>
+      <div class="spec-value">{{duration}}s</div>
+    </div>
+    <div class="spec-card">
+      <div class="spec-label">EMOTION / 情绪</div>
+      <div class="spec-value">{{emotion}}</div>
+    </div>
+  </div>
+
+  <div class="subtitle-area">{{subtitle_text}}</div>
+</div>
+
+<div class="bottom-bar">
+  <div class="duration-bar"><div class="duration-fill"></div></div>
+  <div class="duration-text">DURATION: {{duration}}s &nbsp;|&nbsp; 预估成本: ${{cost}}</div>
+</div>
+
+<div class="footer">
+  StructForge Blueprint Engine &nbsp;|&nbsp; Pre-viz Render &nbsp;|&nbsp; Copy prompt to Seedance/Runway/Kling
+</div>
+</body>
+</html>
